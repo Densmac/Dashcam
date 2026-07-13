@@ -43,16 +43,17 @@ class DownloadWorker @AssistedInject constructor(
         val id = inputData.getString(Keys.DOWNLOAD_ID) ?: return@withContext Result.failure()
         val remotePath = inputData.getString(Keys.REMOTE_PATH) ?: return@withContext Result.failure()
         val localPath = inputData.getString(Keys.LOCAL_PATH) ?: return@withContext Result.failure()
-        val finalFile = File(localPath)
-        val partialFile = File("$localPath.partial")
-        finalFile.parentFile?.mkdirs()
-
-        if (downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.RUNNING, System.currentTimeMillis(), null) == 0) {
-            return@withContext Result.failure()
-        }
-        setForeground(notificationHelper.foregroundInfo("Downloading dashcam file", 0, true))
 
         try {
+            val finalFile = File(localPath)
+            val partialFile = File("$localPath.partial")
+            finalFile.parentFile?.mkdirs()
+
+            if (downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.RUNNING, System.currentTimeMillis(), null) == 0) {
+                return@withContext Result.failure()
+            }
+            setForeground(notificationHelper.foregroundInfo("Downloading dashcam file", 0, true))
+
             val bind = networkBinder.findAndBindDashcamNetwork()
             if (bind is AppResult.Failure) {
                 downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.FAILED, System.currentTimeMillis(), bind.error.userMessage())
@@ -135,7 +136,7 @@ class DownloadWorker @AssistedInject constructor(
             markCancelledIfExplicit(id)
             throw cancellation
         } catch (throwable: Throwable) {
-            when (downloadDao.getById(id)?.status) {
+            when (statusOrNull(id)) {
                 DownloadStatus.CANCELLED -> {
                     markCancelledIfExplicit(id)
                     Result.failure()
@@ -144,12 +145,7 @@ class DownloadWorker @AssistedInject constructor(
                     if (isStopped) {
                         Result.failure()
                     } else {
-                        downloadDao.updateStatusUnlessCancelled(
-                            id,
-                            DownloadStatus.FAILED,
-                            System.currentTimeMillis(),
-                            AppError.DownloadFailed.userMessage()
-                        )
+                        markFailedUnlessCancelled(id, AppError.DownloadFailed.userMessage())
                         Result.retry()
                     }
                 }
@@ -160,9 +156,25 @@ class DownloadWorker @AssistedInject constructor(
     private suspend fun shouldStop(id: String): Boolean =
         isStopped || downloadDao.getById(id)?.status in setOf(null, DownloadStatus.CANCELLED)
 
+    private suspend fun statusOrNull(id: String): DownloadStatus? =
+        runCatching { downloadDao.getById(id)?.status }.getOrNull()
+
+    private suspend fun markFailedUnlessCancelled(id: String, message: String) {
+        runCatching {
+            downloadDao.updateStatusUnlessCancelled(
+                id,
+                DownloadStatus.FAILED,
+                System.currentTimeMillis(),
+                message
+            )
+        }
+    }
+
     private suspend fun markCancelledIfExplicit(id: String) {
-        if (downloadDao.getById(id)?.status == DownloadStatus.CANCELLED) {
-            downloadDao.updateStatus(id, DownloadStatus.CANCELLED, System.currentTimeMillis(), null)
+        runCatching {
+            if (downloadDao.getById(id)?.status == DownloadStatus.CANCELLED) {
+                downloadDao.updateStatus(id, DownloadStatus.CANCELLED, System.currentTimeMillis(), null)
+            }
         }
     }
 

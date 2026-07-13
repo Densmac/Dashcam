@@ -71,7 +71,7 @@ class SettingsRepositoryImpl @Inject constructor(
             is AppResult.Failure -> bind
         }
 
-    private fun mapSettings(items: List<ParamItemDto>, values: List<ParamValueDto>): DashcamSettings {
+    internal fun mapSettings(items: List<ParamItemDto>, values: List<ParamValueDto>): DashcamSettings {
         val supported = items.associateBy { it.name }
         val current = values.associate { it.name to it.value }
         fun present(name: String) = supported.containsKey(name) && current.containsKey(name)
@@ -83,7 +83,13 @@ class SettingsRepositoryImpl @Inject constructor(
             speakerLevel = if (present("speaker")) LevelSetting.fromValue(current["speaker"]) else null,
             gSensorSensitivity = if (present("gsr_sensitivity")) LevelSetting.fromValue(current["gsr_sensitivity"]) else null,
             timelapseRate = if (present("timelapse_rate")) TimelapseRate.fromValue(current["timelapse_rate"]) else null,
-            resolutionLabel = supported["rec_resolution"]?.items?.firstOrNull()
+            resolutionLabel = resolutionLabel(supported["rec_resolution"], current["rec_resolution"])
         )
+    }
+
+    private fun resolutionLabel(item: ParamItemDto?, currentValue: Int?): String? {
+        if (item == null || currentValue == null) return null
+        val itemPosition = item.index.indexOf(currentValue)
+        return item.items.getOrNull(itemPosition)
     }
 }

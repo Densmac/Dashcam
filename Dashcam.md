@@ -667,6 +667,7 @@ Uses .partial temporary file.
 Supports HTTP Range resume when .partial exists.
 If server ignores Range and returns 200, verifies partial delete before restarting full download.
 Writes using 128 KiB buffer.
+Initial RUNNING status and foreground notification setup are inside the same exception handling path as the download.
 Updates foreground notification and Room progress every 512 KiB.
 Checks cancellation before reads, before final file replacement, and before marking COMPLETED.
 RUNNING, progress, FAILED, and COMPLETED worker writes use conditional DAO updates that do not overwrite CANCELLED rows.
@@ -707,6 +708,7 @@ Calls /app/setting?param=enter.
 Calls /app/getparamitems?param=all.
 Calls /app/getparamvalue?param=all.
 Only maps settings present in both supported items and current values, except rec.
+rec_resolution maps only when the current rec_resolution value matches an index entry from supported items.
 ```
 
 Implemented safe dashcam settings writes:
@@ -830,6 +832,8 @@ HTTP timeout constants are used by injected OkHttp clients.
 LocalFileIntentViewer is named according to its ACTION_VIEW external viewer behavior.
 Haptics are preference-aware on primary tab/settings navigation.
 Live no-feed rendering is grain-only static behind overlaid controls, without scanlines or vertical scrolling artifacts.
+DownloadWorker initial RUNNING status and ForegroundInfo setup are inside the documented exception/failure handling path.
+rec_resolution display is derived from current value plus supported index mapping, not from the first supported label alone.
 ```
 
 ## 19. Known Non-Goals Or Not Yet Wired
@@ -866,18 +870,20 @@ Most recent verification performed during this implementation pass:
 ./gradlew :app:compileDebugKotlin
 ./gradlew :app:testDebugUnitTest
 ./gradlew :app:assembleDebug
-adb -s 3344bd2b install -r app/build/outputs/apk/debug/app-debug.apk
-adb -s 3344bd2b shell am start -S -W -n com.densmac.dashcam/.MainActivity
+adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 shell am start -S -W -n com.densmac.dashcam/.MainActivity
 ```
 
-Observed launch result on physical device 3344bd2b:
+Observed launch result on emulator-5554:
 
 ```text
 Status: ok
 LaunchState: COLD
 Activity: com.densmac.dashcam/.MainActivity
-TotalTime: 1184 ms
+TotalTime: 1588 ms
 ```
+
+Physical device `3344bd2b` was not attached during this pass; only `emulator-5554` was available through adb.
 
 ## 21. Auditor Checklist
 
@@ -898,12 +904,14 @@ Coil is not packaged as an app dependency.
 Delete remains confirmation-gated.
 Local download delete is also confirmation-gated and checks file deletion results.
 Download cancellation remains CANCELLED after explicit user cancel.
+Download worker setup exceptions are handled by the same failure/retry path as download exceptions.
 Download worker does not mark COMPLETED after cancellation before finalization.
 Local download deletion cancels unique work and waits for cancellation before file and row deletion.
 Downloads are stored in app-specific external files.
 ThemeMode.SYSTEM follows Android system light/dark mode.
 preferredCamera, autoStartLivePreview, and cameraMappingSwapped affect Live behavior.
 Live start sends switchcam for the preferred camera even when preferredCamera is FRONT.
+rec_resolution display requires both a current value and a matching supported index.
 Live no-feed effect is grain-only static with controls overlaid above it.
 Folder chips in Library call LibraryViewModel.load(folder) and are functional.
 RTSP player is released on screen disposal/ViewModel clear and startup timeout.
