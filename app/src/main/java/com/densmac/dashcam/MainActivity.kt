@@ -4,44 +4,40 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.tooling.preview.Preview
-import com.densmac.dashcam.ui.theme.DashcamTheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.densmac.dashcam.core.design.theme.DashcamTheme
+import com.densmac.dashcam.data.datastore.UserPreferences
+import com.densmac.dashcam.data.datastore.UserPreferencesDataSource
+import com.densmac.dashcam.ui.navigation.AppNavGraph
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject lateinit var preferencesDataSource: UserPreferencesDataSource
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            DashcamTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+            val preferences by preferencesDataSource.preferences.collectAsStateWithLifecycle(UserPreferences())
+            DashcamTheme(
+                themeMode = preferences.themeMode,
+                dynamicColor = preferences.dynamicColorEnabled
+            ) {
+                AppNavGraph(hapticsEnabled = preferences.hapticsEnabled)
             }
         }
     }
 }
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
+fun AppPreview() {
     DashcamTheme {
-        Greeting("Android")
+        AppNavGraph()
     }
 }
