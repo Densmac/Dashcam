@@ -84,12 +84,13 @@ fun LibraryScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(74.dp)
+                .height(56.dp)
         ) {
             Text(
                 "Vault",
-                modifier = Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.displaySmall
+                modifier = Modifier.align(Alignment.CenterStart),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
             )
             Row(
                 modifier = Modifier.align(Alignment.CenterEnd),

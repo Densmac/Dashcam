@@ -45,6 +45,8 @@ import com.densmac.dashcam.core.design.haptics.HapticEvent
 import com.densmac.dashcam.core.design.haptics.LocalDashcamHapticsEnabled
 import com.densmac.dashcam.core.design.haptics.hapticClickable
 import com.densmac.dashcam.core.design.haptics.rememberDashcamHaptics
+import com.densmac.dashcam.core.design.components.ThemeModeSwitch
+import com.densmac.dashcam.data.datastore.ThemeMode
 import com.densmac.dashcam.ui.screens.detail.ClipDetailScreen
 import com.densmac.dashcam.ui.screens.downloads.DownloadsScreen
 import com.densmac.dashcam.ui.screens.library.LibraryScreen
@@ -61,7 +63,11 @@ private val bottomItems = listOf(
 )
 
 @Composable
-fun AppNavGraph(hapticsEnabled: Boolean = true) {
+fun AppNavGraph(
+    hapticsEnabled: Boolean = true,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    onThemeModeChange: (ThemeMode) -> Unit = {}
+) {
     val navController = rememberNavController()
     CompositionLocalProvider(
         LocalContentColor provides MaterialTheme.colorScheme.onBackground,
@@ -79,6 +85,8 @@ fun AppNavGraph(hapticsEnabled: Boolean = true) {
                 composable(Route.MainTabs.path) {
                     MainTabsScreen(
                         hapticsEnabled = hapticsEnabled,
+                        themeMode = themeMode,
+                        onThemeModeChange = onThemeModeChange,
                         onOpenSettings = { navController.navigate(Route.Settings.path) },
                         onOpenDetail = { navController.navigate(Route.ClipDetail.create(it)) }
                     )
@@ -98,6 +106,8 @@ fun AppNavGraph(hapticsEnabled: Boolean = true) {
 @Composable
 private fun MainTabsScreen(
     hapticsEnabled: Boolean,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDetail: (String) -> Unit
 ) {
@@ -130,6 +140,8 @@ private fun MainTabsScreen(
         }
 
         DriveDeckHeader(
+            themeMode = themeMode,
+            onThemeModeChange = onThemeModeChange,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
@@ -180,46 +192,48 @@ private fun DriveDeckBackground(): Brush {
 
 @Composable
 private fun DriveDeckHeader(
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(48.dp)
     ) {
+        // Small brand mark, left.
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .size(52.dp)
-                .clip(CircleShape)
+                .size(40.dp)
+                .clip(RoundedCornerShape(13.dp))
                 .background(
-                    Brush.linearGradient(
-                        listOf(
-                            Color(0xFFC5784D),
-                            MaterialTheme.colorScheme.primary
-                        )
-                    )
+                    Brush.linearGradient(listOf(Color(0xFFC5784D), MaterialTheme.colorScheme.primary))
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Text("D", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Black)
+            Text("D", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         }
-        Text(
-            "Dashcam",
-            modifier = Modifier.align(Alignment.Center),
-            style = MaterialTheme.typography.titleMedium
+
+        // Centered theme switch.
+        ThemeModeSwitch(
+            selected = themeMode,
+            onSelect = onThemeModeChange,
+            modifier = Modifier.align(Alignment.Center)
         )
+
+        // Settings, right.
         IconButton(
             onClick = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .size(52.dp)
+                .size(44.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.86f))
-                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f), CircleShape)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), CircleShape)
         ) {
-            Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+            Icon(Icons.Outlined.Settings, contentDescription = "Settings", modifier = Modifier.size(20.dp))
         }
     }
 }

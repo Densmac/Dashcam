@@ -44,7 +44,6 @@ import com.densmac.dashcam.core.design.components.GlassCard
 import com.densmac.dashcam.core.design.components.SectionHeader
 import com.densmac.dashcam.core.design.haptics.hapticClickable
 import com.densmac.dashcam.core.design.haptics.rememberHapticClick
-import com.densmac.dashcam.data.datastore.ThemeMode
 import com.densmac.dashcam.domain.model.DashcamConnectionState
 import com.densmac.dashcam.domain.model.LevelSetting
 import com.densmac.dashcam.domain.model.LoopDuration
@@ -69,7 +68,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(74.dp)
+                .height(56.dp)
         ) {
             if (onBack != null) {
                 IconButton(
@@ -82,7 +81,8 @@ fun SettingsScreen(
             Text(
                 "Settings",
                 modifier = Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.displaySmall
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
             )
         }
         ConnectionSection(state)
@@ -91,7 +91,6 @@ fun SettingsScreen(
         StorageSection(state)
         AppearanceSection(state, viewModel)
         DiagnosticsSection(state, viewModel)
-        DeferredSection()
         DashcamButton("Refresh", viewModel::refresh, modifier = Modifier.fillMaxWidth())
         state.message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
@@ -186,9 +185,8 @@ private fun StorageSection(state: SettingsUiState) {
 private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewModel) {
     GlassCard {
         SectionHeader("Appearance")
-        Spacer(Modifier.height(12.dp))
-        Text("Theme", fontWeight = FontWeight.SemiBold)
-        ChoiceRow(ThemeMode.entries, state.preferences.themeMode, { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } }, viewModel::setThemeMode)
+        Spacer(Modifier.height(6.dp))
+        // Theme mode lives in the top-bar switch; keep only the rest here to avoid a duplicate control.
         ToggleRow("Dynamic color", state.preferences.dynamicColorEnabled, viewModel::setDynamicColor)
         ToggleRow("Haptics", state.preferences.hapticsEnabled, viewModel::setHaptics)
         ToggleRow("Auto-start live preview", state.preferences.autoStartLivePreview, viewModel::setAutoStart)
@@ -206,23 +204,6 @@ private fun DiagnosticsSection(state: SettingsUiState, viewModel: SettingsViewMo
             Text("HTTP base: ${DashcamConstants.HTTP_BASE_URL}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("RTSP URL: ${DashcamConstants.RTSP_TRACK2_URL}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Last known device: ${state.preferences.lastKnownDeviceUuid ?: "None"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun DeferredSection() {
-    GlassCard {
-        SectionHeader("Deferred")
-        Spacer(Modifier.height(12.dp))
-        listOf(
-            "Lock/protect video",
-            "Unlock video",
-            "Format SD card",
-            "Change Wi-Fi password",
-            "Change Wi-Fi SSID"
-        ).forEach {
-            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
