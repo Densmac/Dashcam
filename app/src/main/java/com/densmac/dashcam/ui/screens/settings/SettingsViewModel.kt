@@ -87,6 +87,53 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(confirmStopRecording = false) }
     }
 
+    fun requestEditWifiSsid() = _uiState.update { it.copy(editWifiSsid = true) }
+    fun requestEditWifiPassword() = _uiState.update { it.copy(editWifiPassword = true) }
+    fun dismissWifiDialogs() = _uiState.update { it.copy(editWifiSsid = false, editWifiPassword = false) }
+
+    fun submitWifiSsid(newSsid: String) {
+        _uiState.update { it.copy(editWifiSsid = false) }
+        runAction(
+            action = { dashcamRepository.setWifiSsid(newSsid) },
+            successMessage = "Wi-Fi renamed to \"$newSsid\". Reconnect your phone to that network."
+        )
+    }
+
+    fun submitWifiPassword(newPassword: String) {
+        _uiState.update { it.copy(editWifiPassword = false) }
+        runAction(
+            action = { dashcamRepository.setWifiPassword(newPassword) },
+            successMessage = "Wi-Fi password changed. Reconnect your phone with the new password."
+        )
+    }
+
+    fun requestFormat() = _uiState.update { it.copy(confirmFormat = true) }
+    fun dismissFormat() = _uiState.update { it.copy(confirmFormat = false) }
+
+    fun confirmFormat() {
+        _uiState.update { it.copy(confirmFormat = false) }
+        viewModelScope.launch {
+            _uiState.update { it.copy(loading = true, message = null) }
+            when (val result = dashcamRepository.formatSdCard()) {
+                is AppResult.Success -> {
+                    _uiState.update { it.copy(message = "SD card formatted.") }
+                    refresh()
+                }
+                is AppResult.Failure -> _uiState.update { it.copy(loading = false, message = result.error.userMessage()) }
+            }
+        }
+    }
+
+    private fun runAction(action: suspend () -> AppResult<Unit>, successMessage: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(loading = true, message = null) }
+            when (val result = action()) {
+                is AppResult.Success -> _uiState.update { it.copy(loading = false, message = successMessage) }
+                is AppResult.Failure -> _uiState.update { it.copy(loading = false, message = result.error.userMessage()) }
+            }
+        }
+    }
+
     fun setThemeMode(value: ThemeMode) = viewModelScope.launch { preferencesDataSource.setThemeMode(value) }
     fun setDynamicColor(value: Boolean) = viewModelScope.launch { preferencesDataSource.setDynamicColorEnabled(value) }
     fun setHaptics(value: Boolean) = viewModelScope.launch { preferencesDataSource.setHapticsEnabled(value) }

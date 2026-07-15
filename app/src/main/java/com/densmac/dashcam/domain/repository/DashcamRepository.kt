@@ -18,4 +18,13 @@ interface DashcamRepository {
     suspend fun exitSettings(): AppResult<Unit>
     suspend fun getStorageStatus(): AppResult<StorageStatus>
     suspend fun getBatteryInfo(): AppResult<BatteryInfo?>
+
+    /** Rename the dashcam Wi-Fi AP. The AP reboots; the phone must reconnect to [ssid] afterwards. */
+    suspend fun setWifiSsid(ssid: String): AppResult<Unit>
+
+    /** Change the dashcam Wi-Fi password. The AP reboots; the phone must reconnect with [password]. */
+    suspend fun setWifiPassword(password: String): AppResult<Unit>
+
+    /** Format the dashcam SD card. Destructive: erases all footage. */
+    suspend fun formatSdCard(): AppResult<Unit>
 }

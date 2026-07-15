@@ -313,6 +313,45 @@ GET /app/deletefile?file=/mnt/sdcard/...
 GET /mnt/sdcard/... for raw file downloads
 ```
 
+Device management protocol (reverse-engineered from Viidure via PCAPdroid, 2026-07-15):
+
+```text
+These cover the previously-deferred features (Wi-Fi SSID/password, Format SD).
+All are wrapped by Viidure in: rec-stop + settings-enter, matching how the app already
+wraps setparamvalue in setting enter/exit.
+
+Change Wi-Fi SSID:
+  GET /app/setparamvalue?param=rec&value=0     (stop recording)
+  GET /app/setting?param=enter
+  GET /app/setwifi?wifissid=<newName>          -> {"result":0,"info":"set success"}
+  GET /app/wifireboot                          (restarts AP; returns {result: 98} but reboots)
+  GET /app/exitrecorder
+  (phone must then reconnect to the new SSID)
+
+Change Wi-Fi password:
+  GET /app/setparamvalue?param=rec&value=0
+  GET /app/setting?param=enter
+  GET /app/setwifi?wifipwd=<newPassword>       -> {"result":0,"info":"set success"}
+  GET /app/wifireboot
+  GET /app/exitrecorder
+  (phone must then reconnect with the new password)
+
+Format SD card (DESTRUCTIVE - wipes all footage):
+  GET /app/setparamvalue?param=rec&value=0
+  GET /app/setting?param=enter
+  GET /app/sdformat?index=1                    (index=1 = the SD slot)
+
+Param names verified exact: wifissid, wifipwd (wifipasswd/wifipassword are rejected).
+Value constraints (Viidure UI): SSID 4-22 chars, password 8-22 chars, alphanumeric only,
+no special characters.
+
+Other endpoints discovered this session (not yet used by the app):
+  GET /app/exitrecorder      (opposite of enterrecorder)
+  GET /app/getstorageinfo
+  GET /app/settimezone?timezone=<int>
+  GET /app/setsystime?date=YYYYMMDDHHMMSS
+```
+
 Critical encoding detail:
 
 ```text

@@ -18,14 +18,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +48,7 @@ import com.densmac.dashcam.core.common.DashcamConstants
 import com.densmac.dashcam.core.common.mbToDisplayGb
 import com.densmac.dashcam.core.design.components.ConfirmDangerDialog
 import com.densmac.dashcam.core.design.components.DashcamButton
+import com.densmac.dashcam.core.design.components.DashcamButtonStyle
 import com.densmac.dashcam.core.design.components.GlassCard
 import com.densmac.dashcam.core.design.components.SectionHeader
 import com.densmac.dashcam.core.design.haptics.hapticClickable
@@ -86,9 +95,10 @@ fun SettingsScreen(
             )
         }
         ConnectionSection(state)
+        NetworkSection(state, viewModel)
         RecordingSection(state, viewModel)
         SoundSection(state, viewModel)
-        StorageSection(state)
+        StorageSection(state, viewModel)
         AppearanceSection(state, viewModel)
         DiagnosticsSection(state, viewModel)
         DashcamButton("Refresh", viewModel::refresh, modifier = Modifier.fillMaxWidth())
@@ -102,6 +112,79 @@ fun SettingsScreen(
             onConfirm = viewModel::confirmStopRecording,
             onDismiss = viewModel::dismissStopRecording
         )
+    }
+    if (state.editWifiSsid) {
+        WifiTextDialog(
+            title = "Wi-Fi name",
+            label = "New network name",
+            initial = state.currentSsid.orEmpty(),
+            confirmEnabled = { it.matches(SSID_REGEX) },
+            helper = "4–22 letters and numbers, no spaces or symbols.",
+            onConfirm = viewModel::submitWifiSsid,
+            onDismiss = viewModel::dismissWifiDialogs
+        )
+    }
+    if (state.editWifiPassword) {
+        WifiPasswordDialog(
+            onConfirm = viewModel::submitWifiPassword,
+            onDismiss = viewModel::dismissWifiDialogs
+        )
+    }
+    if (state.confirmFormat) {
+        ConfirmDangerDialog(
+            title = "Format SD card?",
+            message = "This permanently erases all recordings on the dashcam SD card. This cannot be undone.",
+            confirmText = "Erase everything",
+            onConfirm = viewModel::confirmFormat,
+            onDismiss = viewModel::dismissFormat
+        )
+    }
+}
+
+private val SSID_REGEX = Regex("^[A-Za-z0-9]{4,22}$")
+private val WIFI_PWD_REGEX = Regex("^[A-Za-z0-9]{8,22}$")
+
+@Composable
+private fun NetworkSection(state: SettingsUiState, viewModel: SettingsViewModel) {
+    val connected = state.connectionState is DashcamConnectionState.Connected
+    GlassCard {
+        SectionHeader("Network")
+        Spacer(Modifier.height(6.dp))
+        NavRow(
+            title = "Wi-Fi name",
+            value = state.currentSsid ?: "—",
+            enabled = connected,
+            onClick = viewModel::requestEditWifiSsid
+        )
+        NavRow(
+            title = "Wi-Fi password",
+            value = "••••••••",
+            enabled = connected,
+            onClick = viewModel::requestEditWifiPassword
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Changing either restarts the dashcam Wi-Fi; you'll need to reconnect this phone.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun NavRow(title: String, value: String, enabled: Boolean, onClick: () -> Unit) {
+    val click = rememberHapticClick(onClick = onClick)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .then(if (enabled) Modifier.hapticClickable(onClick = onClick) else Modifier)
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }
 
@@ -166,7 +249,7 @@ private fun SoundSection(state: SettingsUiState, viewModel: SettingsViewModel) {
 }
 
 @Composable
-private fun StorageSection(state: SettingsUiState) {
+private fun StorageSection(state: SettingsUiState, viewModel: SettingsViewModel) {
     GlassCard {
         SectionHeader("Storage")
         Spacer(Modifier.height(14.dp))
@@ -178,7 +261,85 @@ private fun StorageSection(state: SettingsUiState) {
             Spacer(Modifier.height(10.dp))
             Text("${storage.freeMb.mbToDisplayGb()} free of ${storage.totalMb.mbToDisplayGb()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Spacer(Modifier.height(14.dp))
+        DashcamButton(
+            "Format SD card",
+            viewModel::requestFormat,
+            icon = Icons.Outlined.DeleteForever,
+            style = DashcamButtonStyle.Outline,
+            enabled = state.connectionState is DashcamConnectionState.Connected,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
+}
+
+@Composable
+private fun WifiTextDialog(
+    title: String,
+    label: String,
+    initial: String,
+    confirmEnabled: (String) -> Boolean,
+    helper: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var value by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    singleLine = true,
+                    label = { Text(label) }
+                )
+                Text(helper, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(value) }, enabled = confirmEnabled(value)) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun WifiPasswordDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var pwd by remember { mutableStateOf("") }
+    var confirmPwd by remember { mutableStateOf("") }
+    val valid = pwd.matches(WIFI_PWD_REGEX) && pwd == confirmPwd
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Wi-Fi password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = pwd,
+                    onValueChange = { pwd = it },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("New password") }
+                )
+                OutlinedTextField(
+                    value = confirmPwd,
+                    onValueChange = { confirmPwd = it },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("Confirm password") }
+                )
+                Text(
+                    if (confirmPwd.isNotEmpty() && pwd != confirmPwd) "Passwords don't match."
+                    else "8–22 letters and numbers, no spaces or symbols.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (confirmPwd.isNotEmpty() && pwd != confirmPwd) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(pwd) }, enabled = valid) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable

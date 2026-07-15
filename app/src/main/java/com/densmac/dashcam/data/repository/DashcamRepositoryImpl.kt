@@ -1,5 +1,6 @@
 package com.densmac.dashcam.data.repository
 
+import com.densmac.dashcam.core.common.AppError
 import com.densmac.dashcam.core.common.AppResult
 import com.densmac.dashcam.core.network.DashcamNetworkBinder
 import com.densmac.dashcam.data.api.DashcamApi
@@ -105,6 +106,42 @@ class DashcamRepositoryImpl @Inject constructor(
         val bind = ensureBound()
         if (bind is AppResult.Failure) return bind
         return safeApiCall({ api.getBatteryInfo() }) { mapper.battery(it.info) }
+    }
+
+    override suspend fun setWifiSsid(ssid: String): AppResult<Unit> =
+        setWifiAndReboot { safeApiCall({ api.setWifiSsid(ssid) }) { Unit } }
+
+    override suspend fun setWifiPassword(password: String): AppResult<Unit> =
+        setWifiAndReboot { safeApiCall({ api.setWifiPassword(password) }) { Unit } }
+
+    // Mirrors Viidure's captured sequence: enter settings, setwifi (returns "set success"),
+    // then wifireboot to apply. wifireboot returns {result: 98} and drops the AP connection,
+    // so its result/errors are ignored — the reboot is a fire-and-forget side effect.
+    private suspend fun setWifiAndReboot(setWifi: suspend () -> AppResult<Unit>): AppResult<Unit> {
+        val bind = ensureBound()
+        if (bind is AppResult.Failure) return bind
+        val enter = safeApiCall({ api.setting("enter") }) { Unit }
+        if (enter is AppResult.Failure) return enter
+        val set = setWifi()
+        if (set is AppResult.Failure) return set
+        runCatching { api.wifiReboot() }
+        return AppResult.Success(Unit)
+    }
+
+    override suspend fun formatSdCard(): AppResult<Unit> {
+        val bind = ensureBound()
+        if (bind is AppResult.Failure) return bind
+        // Match Viidure: stop recording, enter settings, then sdformat?index=1.
+        runCatching { api.setParamValue("rec", 0) }
+        val enter = safeApiCall({ api.setting("enter") }) { Unit }
+        if (enter is AppResult.Failure) return enter
+        return when (val result = safeApiCall({ api.formatSdCard(1) }) { Unit }) {
+            is AppResult.Success -> result
+            // A full-card format can outlast the HTTP timeout; since settings-enter already
+            // proved the camera is reachable, treat a timeout as "format in progress".
+            is AppResult.Failure ->
+                if (result.error is AppError.DashcamApiUnreachable) AppResult.Success(Unit) else result
+        }
     }
 
     private suspend fun ensureBound(): AppResult<Unit> =

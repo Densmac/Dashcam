@@ -27,6 +27,21 @@ interface DashcamApi {
     @GET(DashcamConstants.ENDPOINT_ENTER_RECORDER)
     suspend fun enterRecorder(): StringInfoResponse
 
+    @GET(DashcamConstants.ENDPOINT_EXIT_RECORDER)
+    suspend fun exitRecorder(): StringInfoResponse
+
+    @GET(DashcamConstants.ENDPOINT_SET_WIFI)
+    suspend fun setWifiSsid(@Query("wifissid") ssid: String): StringInfoResponse
+
+    @GET(DashcamConstants.ENDPOINT_SET_WIFI)
+    suspend fun setWifiPassword(@Query("wifipwd") password: String): StringInfoResponse
+
+    @GET(DashcamConstants.ENDPOINT_WIFI_REBOOT)
+    suspend fun wifiReboot(): StringInfoResponse
+
+    @GET(DashcamConstants.ENDPOINT_SD_FORMAT)
+    suspend fun formatSdCard(@Query("index") index: Int = 1): StringInfoResponse
+
     @GET(DashcamConstants.ENDPOINT_GET_PARAM_ITEMS)
     suspend fun getParamItems(@Query("param") param: String = "all"): ParamItemsResponse
 
