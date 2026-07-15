@@ -62,8 +62,8 @@ interface DashcamApi {
     ): FileListResponse
 
     @GET(DashcamConstants.ENDPOINT_GET_THUMBNAIL)
-    suspend fun getThumbnail(@Query("file", encoded = false) fullPath: String): ResponseBody
+    suspend fun getThumbnail(@Query("file", encoded = true) fullPath: String): ResponseBody
 
     @GET(DashcamConstants.ENDPOINT_DELETE_FILE)
-    suspend fun deleteFile(@Query("file", encoded = false) fullPath: String): StringInfoResponse
+    suspend fun deleteFile(@Query("file", encoded = true) fullPath: String): StringInfoResponse
 }

@@ -5,6 +5,7 @@ import android.os.Environment
 import com.densmac.dashcam.core.common.AppError
 import com.densmac.dashcam.core.common.AppResult
 import com.densmac.dashcam.core.common.DispatchersProvider
+import com.densmac.dashcam.core.common.Logger
 import com.densmac.dashcam.data.db.DownloadEntity
 import com.densmac.dashcam.data.db.dao.DownloadDao
 import com.densmac.dashcam.data.download.DashcamDownloadManager
@@ -38,11 +39,15 @@ class DownloadRepositoryImpl @Inject constructor(
         try {
             val id = stableId(file.path)
             val existing = downloadDao.getById(id)
-            if (existing?.status in setOf(DownloadStatus.QUEUED, DownloadStatus.RUNNING, DownloadStatus.COMPLETED)) {
+            if (
+                existing?.status == DownloadStatus.COMPLETED &&
+                File(existing.localPath).let { it.exists() && it.length() > 0L }
+            ) {
                 return@withContext AppResult.Success(Unit)
             }
             val localPath = localPathFor(file)
             val now = System.currentTimeMillis()
+            Logger.d("Queue file download: ${file.path} -> $localPath")
             downloadDao.upsert(
                 DownloadEntity(
                     id = id,
@@ -59,7 +64,7 @@ class DownloadRepositoryImpl @Inject constructor(
                     errorMessage = null
                 )
             )
-            downloadManager.enqueue(id, file.path, localPath)
+            downloadManager.replace(id, file.path, localPath)
             AppResult.Success(Unit)
         } catch (throwable: Throwable) {
             AppResult.Failure(AppError.DownloadFailed)

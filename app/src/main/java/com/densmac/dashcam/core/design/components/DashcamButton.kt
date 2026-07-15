@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.densmac.dashcam.core.design.haptics.rememberHapticClick
 
 enum class DashcamButtonStyle { Primary, Tonal, Outline }
 
@@ -35,9 +36,10 @@ fun DashcamButton(
     }
     val padding = PaddingValues(horizontal = 22.dp, vertical = 16.dp)
     val sizedModifier = modifier.defaultMinSize(minHeight = 58.dp)
+    val hapticClick = rememberHapticClick(onClick = onClick)
     when (style) {
-        DashcamButtonStyle.Primary -> Button(onClick, sizedModifier, enabled = enabled, contentPadding = padding, content = content)
-        DashcamButtonStyle.Tonal -> FilledTonalButton(onClick, sizedModifier, enabled = enabled, contentPadding = padding, content = content)
-        DashcamButtonStyle.Outline -> OutlinedButton(onClick, sizedModifier, enabled = enabled, contentPadding = padding, content = content)
+        DashcamButtonStyle.Primary -> Button(hapticClick, sizedModifier, enabled = enabled, contentPadding = padding, content = content)
+        DashcamButtonStyle.Tonal -> FilledTonalButton(hapticClick, sizedModifier, enabled = enabled, contentPadding = padding, content = content)
+        DashcamButtonStyle.Outline -> OutlinedButton(hapticClick, sizedModifier, enabled = enabled, contentPadding = padding, content = content)
     }
 }

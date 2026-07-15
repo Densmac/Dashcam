@@ -11,7 +11,9 @@ interface DashcamRepository {
     suspend fun detectDevice(): AppResult<DashcamDevice>
     suspend fun getProductInfo(): AppResult<ProductInfoDto>
     suspend fun getMediaInfo(): AppResult<MediaInfoDto>
+    suspend fun getRecDuration(): AppResult<Int>
     suspend fun enterRecorder(): AppResult<Unit>
+    suspend fun enterPlayback(): AppResult<Unit>
     suspend fun exitPlayback(): AppResult<Unit>
     suspend fun exitSettings(): AppResult<Unit>
     suspend fun getStorageStatus(): AppResult<StorageStatus>

@@ -12,6 +12,7 @@ import com.densmac.dashcam.domain.model.LevelSetting
 import com.densmac.dashcam.domain.model.LoopDuration
 import com.densmac.dashcam.domain.model.TimelapseRate
 import com.densmac.dashcam.domain.repository.SettingsRepository
+import kotlinx.coroutines.delay
 import javax.inject.Inject
 
 class SettingsRepositoryImpl @Inject constructor(
@@ -60,8 +61,20 @@ class SettingsRepositoryImpl @Inject constructor(
         if (param !in safeParams) return AppResult.Failure(com.densmac.dashcam.core.common.AppError.UnsupportedEndpoint)
         val bind = ensureBound()
         if (bind is AppResult.Failure) return bind
+        if (param == "switchcam") return setParamValueDirect(param, value)
         val enter = safeApiCall({ api.setting("enter") }) { Unit }
         if (enter is AppResult.Failure) return enter
+        val firstAttempt = safeApiCall({ api.setParamValue(param, value) }) { Unit }
+        if (firstAttempt is AppResult.Success) return firstAttempt
+        delay(250)
+        safeApiCall({ api.setting("enter") }) { Unit }
+        return safeApiCall({ api.setParamValue(param, value) }) { Unit }
+    }
+
+    private suspend fun setParamValueDirect(param: String, value: Int): AppResult<Unit> {
+        val firstAttempt = safeApiCall({ api.setParamValue(param, value) }) { Unit }
+        if (firstAttempt is AppResult.Success) return firstAttempt
+        delay(250)
         return safeApiCall({ api.setParamValue(param, value) }) { Unit }
     }
 

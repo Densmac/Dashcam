@@ -3,7 +3,6 @@ package com.densmac.dashcam.ui.navigation
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +42,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.densmac.dashcam.core.design.haptics.HapticEvent
+import com.densmac.dashcam.core.design.haptics.LocalDashcamHapticsEnabled
+import com.densmac.dashcam.core.design.haptics.hapticClickable
 import com.densmac.dashcam.core.design.haptics.rememberDashcamHaptics
 import com.densmac.dashcam.ui.screens.detail.ClipDetailScreen
 import com.densmac.dashcam.ui.screens.downloads.DownloadsScreen
@@ -62,7 +63,10 @@ private val bottomItems = listOf(
 @Composable
 fun AppNavGraph(hapticsEnabled: Boolean = true) {
     val navController = rememberNavController()
-    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+    CompositionLocalProvider(
+        LocalContentColor provides MaterialTheme.colorScheme.onBackground,
+        LocalDashcamHapticsEnabled provides hapticsEnabled
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -114,6 +118,7 @@ private fun MainTabsScreen(
         ) { page ->
             when (bottomItems[page].route) {
                 Route.Live -> LiveScreen(
+                    isVisible = pagerState.currentPage == page,
                     onOpenLibrary = {
                         scope.launch { pagerState.animateScrollToPage(1) }
                     }
@@ -138,7 +143,6 @@ private fun MainTabsScreen(
         DriveDeckTabs(
             selectedIndex = pagerState.currentPage,
             onSelected = { index ->
-                if (index != pagerState.currentPage) haptics(HapticEvent.Tick)
                 scope.launch { pagerState.animateScrollToPage(index) }
             },
             modifier = Modifier
@@ -262,7 +266,7 @@ private fun DriveDeckTabs(
                             )
                         }
                     )
-                    .clickable { onSelected(index) }
+                    .hapticClickable { onSelected(index) }
                     .padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically

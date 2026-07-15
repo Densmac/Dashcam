@@ -17,12 +17,12 @@ sealed interface AppError {
 }
 
 fun AppError.userMessage(): String = when (this) {
-    AppError.NotConnectedToDashcam -> "Connect to DASHCAM Wi-Fi, then try again."
-    AppError.DashcamApiUnreachable -> "The app could not reach the dashcam. Make sure the camera is powered on and your phone is connected to DASHCAM Wi-Fi."
+    AppError.NotConnectedToDashcam -> "Connect to DASHCAM Wi-Fi first."
+    AppError.DashcamApiUnreachable -> "Dashcam not reachable. Connect to DASHCAM Wi-Fi."
     AppError.UnsupportedEndpoint -> "This feature is not supported by this dashcam."
     AppError.SdCardUnavailable -> "The dashcam SD card is unavailable."
-    AppError.RtspUnavailable -> "Live preview could not start. Re-entering recorder mode may fix it."
-    AppError.DownloadFailed -> "Download failed. Keep your phone connected to DASHCAM Wi-Fi and try again."
+    AppError.RtspUnavailable -> "Live preview failed. Retry."
+    AppError.DownloadFailed -> "Download failed. Keep hotspot off and stay connected directly to DASHCAM Wi-Fi."
     AppError.DeleteFailed -> "Delete failed. The file may already be gone or the dashcam is busy."
     AppError.PermissionDenied -> "Permission was denied."
     AppError.OperationCancelled -> "Operation cancelled."

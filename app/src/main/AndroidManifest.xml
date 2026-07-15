@@ -46,6 +46,22 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <!-- Disable WorkManager's default on-startup initializer so it uses the
+             on-demand Configuration.Provider in DashcamApp, which supplies the
+             HiltWorkerFactory. Without this, WorkManager initializes with the default
+             reflection factory and cannot construct @HiltWorker workers (DownloadWorker),
+             so downloads never run. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>

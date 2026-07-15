@@ -1,8 +1,9 @@
 package com.densmac.dashcam.data.repository
 
-import android.net.Uri
+import com.densmac.dashcam.core.common.AppError
 import com.densmac.dashcam.core.common.AppResult
 import com.densmac.dashcam.core.common.DashcamConstants
+import com.densmac.dashcam.core.common.Logger
 import com.densmac.dashcam.core.network.DashcamNetworkBinder
 import com.densmac.dashcam.data.api.DashcamApi
 import com.densmac.dashcam.data.api.DashcamApiMapper
@@ -13,6 +14,12 @@ import com.densmac.dashcam.domain.model.DashcamFolder
 import com.densmac.dashcam.domain.repository.FileRepository
 import com.densmac.dashcam.domain.usecase.GetFileBundlesUseCase
 import com.google.gson.JsonParseException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import retrofit2.HttpException
+import java.io.IOException
+import java.net.SocketTimeoutException
 import javax.inject.Inject
 
 class FileRepositoryImpl @Inject constructor(
@@ -28,7 +35,7 @@ class FileRepositoryImpl @Inject constructor(
         return safeApiCall({
             api.getFileList(folder.apiValue, start, end)
         }) { response ->
-            required(response.info).map { item ->
+            required(response.info).flatMap { it.files.orEmpty() }.map { item ->
                 mapper.file(item, folder, thumbnailUrl(item.name))
             }
         }
@@ -39,6 +46,26 @@ class FileRepositoryImpl @Inject constructor(
         return when (val files = getFiles(folder, range.first, range.last)) {
             is AppResult.Success -> AppResult.Success(GetFileBundlesUseCase(this).buildBundles(files.data))
             is AppResult.Failure -> files
+        }
+    }
+
+    override suspend fun getThumbnailBytes(path: String): AppResult<ByteArray> = withContext(Dispatchers.IO) {
+        val bind = ensureBound()
+        if (bind is AppResult.Failure) return@withContext bind
+        try {
+            val bytes = api.getThumbnail(path).use { body -> body.bytes() }
+            if (bytes.isEmpty()) AppResult.Failure(AppError.ParseError("Empty thumbnail")) else AppResult.Success(bytes)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: SocketTimeoutException) {
+            AppResult.Failure(AppError.DashcamApiUnreachable)
+        } catch (_: IOException) {
+            AppResult.Failure(AppError.DashcamApiUnreachable)
+        } catch (http: HttpException) {
+            AppResult.Failure(AppError.HttpError(http.code(), http.response()?.errorBody()?.string()))
+        } catch (throwable: Throwable) {
+            Logger.e("Unexpected dashcam thumbnail failure", throwable)
+            AppResult.Failure(AppError.Unknown(throwable))
         }
     }
 
@@ -55,12 +82,7 @@ class FileRepositoryImpl @Inject constructor(
     }
 
     override fun thumbnailUrl(path: String): String =
-        Uri.parse(DashcamConstants.HTTP_BASE_URL)
-            .buildUpon()
-            .appendEncodedPath(DashcamConstants.ENDPOINT_GET_THUMBNAIL)
-            .appendQueryParameter("file", path)
-            .build()
-            .toString()
+        "${DashcamConstants.HTTP_BASE_URL}${DashcamConstants.ENDPOINT_GET_THUMBNAIL}?file=$path"
 
     private suspend fun ensureBound(): AppResult<Unit> =
         when (val bind = networkBinder.findAndBindDashcamNetwork()) {

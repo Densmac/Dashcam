@@ -46,6 +46,11 @@ data class FileItemDto(
     val createtimestr: String? = null,
     val type: Int = 0
 )
+data class FileListGroupDto(
+    val folder: String = "",
+    val count: Int = 0,
+    val files: List<FileItemDto>? = emptyList()
+)
 
 data class DeviceAttrResponse(override val result: Int = -1, val info: DeviceAttrDto? = null) : DashcamApiResponse {
     override fun infoText() = info?.toString()
@@ -91,6 +96,6 @@ data class BatteryInfoResponse(override val result: Int = -1, val info: BatteryI
     override fun infoText() = info?.toString()
 }
 
-data class FileListResponse(override val result: Int = -1, val info: List<FileItemDto>? = null) : DashcamApiResponse {
+data class FileListResponse(override val result: Int = -1, val info: List<FileListGroupDto>? = null) : DashcamApiResponse {
     override fun infoText() = info?.joinToString()
 }

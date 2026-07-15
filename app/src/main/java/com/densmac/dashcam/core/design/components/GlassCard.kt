@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
+import com.densmac.dashcam.core.design.haptics.rememberHapticClick
 import com.densmac.dashcam.core.design.theme.HeroShape
 
 @Composable
@@ -55,10 +56,11 @@ fun GlassCard(
         .background(panelBrush)
         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), shape)
     if (onClick != null) {
+        val hapticClick = rememberHapticClick(onClick = onClick)
         cardModifier = cardModifier.clickable(
             interactionSource = interaction,
             indication = null,
-            onClick = onClick
+            onClick = hapticClick
         )
     }
     Column(cardModifier.padding(contentPadding), content = content)

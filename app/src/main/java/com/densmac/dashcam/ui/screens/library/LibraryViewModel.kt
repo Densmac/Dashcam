@@ -6,10 +6,13 @@ import com.densmac.dashcam.core.common.AppNotice
 import com.densmac.dashcam.core.common.AppResult
 import com.densmac.dashcam.core.common.deleteFilesUserMessage
 import com.densmac.dashcam.core.common.userMessage
+import com.densmac.dashcam.core.network.DashcamConnectionMonitor
+import com.densmac.dashcam.domain.model.DashcamConnectionState
 import com.densmac.dashcam.domain.model.DashcamFile
 import com.densmac.dashcam.domain.model.DashcamFileBundle
 import com.densmac.dashcam.domain.model.DashcamFolder
 import com.densmac.dashcam.domain.repository.DownloadRepository
+import com.densmac.dashcam.domain.repository.FileRepository
 import com.densmac.dashcam.domain.usecase.DeleteFileUseCase
 import com.densmac.dashcam.domain.usecase.GetFileBundlesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,19 +20,45 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val getFileBundles: GetFileBundlesUseCase,
     private val deleteFile: DeleteFileUseCase,
-    private val downloadRepository: DownloadRepository
+    private val downloadRepository: DownloadRepository,
+    private val fileRepository: FileRepository,
+    private val connectionMonitor: DashcamConnectionMonitor
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LibraryUiState())
     val uiState: StateFlow<LibraryUiState> = _uiState.asStateFlow()
+    private var loadedForDeviceUuid: String? = null
+    private var wasConnected = false
+    private val thumbnailMutex = Mutex()
+    private val thumbnailCache = LinkedHashMap<String, ByteArray>()
+    private val thumbnailRequests = mutableMapOf<String, Deferred<ByteArray?>>()
 
     init {
+        connectionMonitor.startMonitoring()
+        viewModelScope.launch {
+            connectionMonitor.connectionState.collect { state ->
+                if (state is DashcamConnectionState.Connected) {
+                    val shouldReload = !wasConnected || loadedForDeviceUuid != state.device.uuid
+                    wasConnected = true
+                    if (shouldReload) {
+                        loadedForDeviceUuid = state.device.uuid
+                        load(uiState.value.folder)
+                    }
+                } else {
+                    wasConnected = false
+                }
+            }
+        }
         load(DashcamFolder.LOOP)
     }
 
@@ -86,5 +115,56 @@ class LibraryViewModel @Inject constructor(
                 is AppResult.Failure -> _uiState.update { it.copy(message = result.error.userMessage()) }
             }
         }
+    }
+
+    suspend fun loadThumbnail(file: DashcamFile): ByteArray? {
+        val path = file.path
+        thumbnailMutex.withLock {
+            thumbnailCache[path]?.let { return it }
+        }
+
+        val request = thumbnailMutex.withLock {
+            thumbnailCache[path]?.let { return it }
+            thumbnailRequests[path] ?: viewModelScope.async {
+                fetchThumbnail(file)
+            }.also { thumbnailRequests[path] = it }
+        }
+
+        return try {
+            request.await()
+        } finally {
+            thumbnailMutex.withLock {
+                if (thumbnailRequests[path] === request) thumbnailRequests.remove(path)
+            }
+        }
+    }
+
+    private suspend fun fetchThumbnail(file: DashcamFile): ByteArray? {
+        val path = file.path
+        val bytes = when (val result = fileRepository.getThumbnailBytes(path)) {
+            is AppResult.Success -> result.data
+            is AppResult.Failure -> null
+        }
+        val cached = thumbnailMutex.withLock { thumbnailCache[path] }
+        if (bytes == null || bytes.size < MIN_USEFUL_THUMBNAIL_BYTES) return cached
+
+        thumbnailMutex.withLock {
+            thumbnailCache[path] = bytes
+            while (thumbnailCache.size > THUMBNAIL_CACHE_LIMIT) {
+                val eldest = thumbnailCache.entries.iterator().next()
+                thumbnailCache.remove(eldest.key)
+            }
+        }
+        return bytes
+    }
+
+    override fun onCleared() {
+        connectionMonitor.stopMonitoring()
+        super.onCleared()
+    }
+
+    private companion object {
+        const val MIN_USEFUL_THUMBNAIL_BYTES = 4 * 1024
+        const val THUMBNAIL_CACHE_LIMIT = 160
     }
 }

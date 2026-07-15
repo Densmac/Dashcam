@@ -90,6 +90,9 @@ private class FakeFileRepository(
     override suspend fun getBundles(folder: DashcamFolder): AppResult<List<DashcamFileBundle>> =
         AppResult.Success(emptyList())
 
+    override suspend fun getThumbnailBytes(path: String): AppResult<ByteArray> =
+        AppResult.Success(ByteArray(0))
+
     override suspend fun takeSnapshot(): AppResult<Unit> = AppResult.Success(Unit)
     override suspend fun deleteFile(path: String): AppResult<Unit> = AppResult.Success(Unit)
     override fun thumbnailUrl(path: String): String = ""

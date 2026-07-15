@@ -9,9 +9,12 @@ import com.densmac.dashcam.core.common.AppError
 import com.densmac.dashcam.core.common.AppResult
 import com.densmac.dashcam.core.common.DashcamConstants
 import com.densmac.dashcam.core.common.DispatchersProvider
+import com.densmac.dashcam.core.common.Logger
 import com.densmac.dashcam.core.common.userMessage
 import com.densmac.dashcam.core.network.DashcamNetworkBinder
 import com.densmac.dashcam.core.network.DownloadOkHttpClient
+import com.densmac.dashcam.data.api.DashcamApi
+import com.densmac.dashcam.data.api.safeApiCall
 import com.densmac.dashcam.data.db.dao.DownloadDao
 import com.densmac.dashcam.domain.model.DownloadStatus
 import dagger.assisted.Assisted
@@ -28,6 +31,7 @@ class DownloadWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     @DownloadOkHttpClient private val client: OkHttpClient,
+    private val api: DashcamApi,
     private val downloadDao: DownloadDao,
     private val networkBinder: DashcamNetworkBinder,
     private val notificationHelper: DownloadNotificationHelper,
@@ -45,6 +49,7 @@ class DownloadWorker @AssistedInject constructor(
         val localPath = inputData.getString(Keys.LOCAL_PATH) ?: return@withContext Result.failure()
 
         try {
+            Logger.d("DownloadWorker starting: id=$id remote=$remotePath local=$localPath")
             val finalFile = File(localPath)
             val partialFile = File("$localPath.partial")
             finalFile.parentFile?.mkdirs()
@@ -56,21 +61,32 @@ class DownloadWorker @AssistedInject constructor(
 
             val bind = networkBinder.findAndBindDashcamNetwork()
             if (bind is AppResult.Failure) {
+                Logger.d("DownloadWorker bind failed: ${bind.error}")
                 downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.FAILED, System.currentTimeMillis(), bind.error.userMessage())
                 return@withContext Result.retry()
             }
+            Logger.d("DownloadWorker bound to dashcam network")
+            val playback = safeApiCall({ api.playback("enter") }) { Unit }
+            if (playback is AppResult.Failure) {
+                Logger.d("DownloadWorker playback enter failed: ${playback.error}")
+                downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.FAILED, System.currentTimeMillis(), playback.error.userMessage())
+                return@withContext Result.retry()
+            }
             val url = DashcamConstants.HTTP_BASE_URL + remotePath.removePrefix("/")
+            Logger.d("DownloadWorker requesting: $url")
             var existing = partialFile.takeIf { it.exists() }?.length() ?: 0L
             var request = Request.Builder().url(url).apply {
                 if (existing > 0) header("Range", "bytes=$existing-")
             }.build()
             var response = client.newCall(request).execute()
+            Logger.d("DownloadWorker response: code=${response.code} contentLength=${response.body?.contentLength()}")
             if (existing > 0 && response.code == 200) {
                 response.close()
                 if (partialFile.exists() && !partialFile.delete()) error("Could not reset partial download")
                 existing = 0L
                 request = Request.Builder().url(url).build()
                 response = client.newCall(request).execute()
+                Logger.d("DownloadWorker restarted response: code=${response.code} contentLength=${response.body?.contentLength()}")
             }
             if (!response.isSuccessful) {
                 downloadDao.updateStatusUnlessCancelled(
@@ -122,6 +138,7 @@ class DownloadWorker @AssistedInject constructor(
                 if (!partialFile.renameTo(finalFile)) {
                     error("Could not finalize download")
                 }
+                Logger.d("DownloadWorker completed: id=$id bytes=$downloaded path=${finalFile.absolutePath}")
                 if (shouldStop(id)) {
                     markCancelledIfExplicit(id)
                     return@withContext Result.failure()
@@ -136,6 +153,7 @@ class DownloadWorker @AssistedInject constructor(
             markCancelledIfExplicit(id)
             throw cancellation
         } catch (throwable: Throwable) {
+            Logger.e("DownloadWorker failed: id=$id remote=$remotePath", throwable)
             when (statusOrNull(id)) {
                 DownloadStatus.CANCELLED -> {
                     markCancelledIfExplicit(id)

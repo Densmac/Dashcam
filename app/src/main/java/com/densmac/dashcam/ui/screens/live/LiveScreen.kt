@@ -8,7 +8,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +57,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.densmac.dashcam.core.common.mbToDisplayGb
 import com.densmac.dashcam.core.design.components.ConfirmDangerDialog
 import com.densmac.dashcam.core.design.components.StatusPill
+import com.densmac.dashcam.core.design.haptics.hapticClickable
+import com.densmac.dashcam.core.design.haptics.rememberHapticClick
 import com.densmac.dashcam.core.player.LivePreviewState
 import com.densmac.dashcam.domain.model.DashcamCamera
 import com.densmac.dashcam.domain.model.DashcamConnectionState
@@ -66,12 +67,17 @@ import kotlin.math.min
 
 @Composable
 fun LiveScreen(
+    isVisible: Boolean,
     onOpenLibrary: () -> Unit,
     viewModel: LiveViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val engine = viewModel.livePreviewEngine
     val context = LocalContext.current
+
+    LaunchedEffect(isVisible) {
+        if (isVisible) viewModel.resumePreview() else engine.release()
+    }
 
     Column(
         modifier = Modifier
@@ -183,10 +189,12 @@ private fun CinematicLivePanel(
                 .clip(RoundedCornerShape(32.dp))
                 .background(Color(0xFF080806))
         ) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { context -> FrameLayout(context).also(attachEngine) }
-            )
+            if (state.previewState.needsPlayerSurface()) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context -> FrameLayout(context).also(attachEngine) }
+                )
+            }
 
             if (state.previewState != LivePreviewState.Playing) {
                 ViewfinderStatic(Modifier.fillMaxSize())
@@ -226,6 +234,7 @@ private fun CinematicLivePanel(
 
             CameraRail(
                 selected = state.selectedCamera,
+                enabled = !state.busy,
                 onSelected = onCamera,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
@@ -268,7 +277,7 @@ private fun ConnectionPill(state: DashcamConnectionState, onClick: () -> Unit) {
             .height(58.dp)
             .clip(RoundedCornerShape(29.dp))
             .background(Color(0xF2F7E7C7))
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
             .padding(horizontal = 18.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -293,6 +302,7 @@ private fun ConnectionPill(state: DashcamConnectionState, onClick: () -> Unit) {
 @Composable
 private fun CameraRail(
     selected: DashcamCamera,
+    enabled: Boolean,
     onSelected: (DashcamCamera) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -311,7 +321,13 @@ private fun CameraRail(
                     .size(46.dp)
                     .clip(RoundedCornerShape(23.dp))
                     .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
-                    .clickable { onSelected(camera) },
+                    .then(
+                        if (enabled && !active) {
+                            Modifier.hapticClickable { onSelected(camera) }
+                        } else {
+                            Modifier
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -331,8 +347,9 @@ private fun IconDeckButton(
     contentDescription: String,
     onClick: () -> Unit
 ) {
+    val hapticClick = rememberHapticClick(onClick = onClick)
     IconButton(
-        onClick = onClick,
+        onClick = hapticClick,
         modifier = Modifier
             .size(50.dp)
             .clip(RoundedCornerShape(25.dp))
@@ -387,7 +404,7 @@ private fun StorageStrip(state: LiveUiState, onOpenLibrary: () -> Unit) {
             .height(76.dp)
             .clip(RoundedCornerShape(30.dp))
             .background(Color(0xD012130E))
-            .clickable(onClick = onOpenLibrary)
+            .hapticClickable(onClick = onOpenLibrary)
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -426,3 +443,13 @@ private fun PreviewOverlay(
 private fun wifiIntent(): Intent =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Intent(Settings.Panel.ACTION_WIFI)
     else Intent(Settings.ACTION_WIFI_SETTINGS)
+
+private fun LivePreviewState.needsPlayerSurface(): Boolean = when (this) {
+    LivePreviewState.Preparing,
+    LivePreviewState.Connecting,
+    LivePreviewState.Buffering,
+    LivePreviewState.Playing -> true
+    LivePreviewState.Idle,
+    LivePreviewState.Released,
+    is LivePreviewState.Error -> false
+}

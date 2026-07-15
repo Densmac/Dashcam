@@ -28,14 +28,27 @@ class DashcamNetworkBinderImpl @Inject constructor(
             connectivityManager.getNetworkCapabilities(network)
                 ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         }
-        val preferred = networks.sortedByDescending { if (looksLikeDashcamNetwork(it)) 1 else 0 }
-        for (network in preferred) {
+        // A network whose link address/gateway is on the dashcam subnet is a strong,
+        // load-independent signal. Bind on it directly instead of an HTTP verify: the
+        // verify request competes with in-flight thumbnail/download traffic and can time
+        // out under load, which would falsely report NotConnectedToDashcam and break
+        // resuming the live feed after visiting the Library.
+        networks.firstOrNull { looksLikeDashcamNetwork(it) }?.let { network ->
+            connectivityManager.bindProcessToNetwork(network)
+            _boundNetwork.value = network
+            return@withContext AppResult.Success(network)
+        }
+        // Fallback: link properties did not identify the dashcam subnet, so confirm the
+        // network answers the dashcam HTTP endpoint before binding.
+        for (network in networks) {
             if (verify(network)) {
                 connectivityManager.bindProcessToNetwork(network)
                 _boundNetwork.value = network
                 return@withContext AppResult.Success(network)
             }
         }
+        connectivityManager.bindProcessToNetwork(null)
+        _boundNetwork.value = null
         AppResult.Failure(AppError.NotConnectedToDashcam)
     }
 
@@ -58,9 +71,13 @@ class DashcamNetworkBinderImpl @Inject constructor(
     private fun verify(network: Network): Boolean = runCatching {
         val url = URL("${DashcamConstants.HTTP_BASE_URL}${DashcamConstants.ENDPOINT_GET_DEVICE_ATTR}")
         val connection = network.openConnection(url) as HttpURLConnection
-        connection.connectTimeout = 2_500
-        connection.readTimeout = 2_500
-        connection.requestMethod = "GET"
-        connection.inputStream.bufferedReader().use { it.readText().contains("\"result\":0") }
+        try {
+            connection.connectTimeout = 2_500
+            connection.readTimeout = 2_500
+            connection.requestMethod = "GET"
+            connection.inputStream.bufferedReader().use { it.readText().contains("\"result\":0") }
+        } finally {
+            connection.disconnect()
+        }
     }.getOrDefault(false)
 }

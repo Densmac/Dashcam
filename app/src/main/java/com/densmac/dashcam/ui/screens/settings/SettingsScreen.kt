@@ -2,7 +2,6 @@ package com.densmac.dashcam.ui.screens.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +42,8 @@ import com.densmac.dashcam.core.design.components.ConfirmDangerDialog
 import com.densmac.dashcam.core.design.components.DashcamButton
 import com.densmac.dashcam.core.design.components.GlassCard
 import com.densmac.dashcam.core.design.components.SectionHeader
+import com.densmac.dashcam.core.design.haptics.hapticClickable
+import com.densmac.dashcam.core.design.haptics.rememberHapticClick
 import com.densmac.dashcam.data.datastore.ThemeMode
 import com.densmac.dashcam.domain.model.DashcamConnectionState
 import com.densmac.dashcam.domain.model.LevelSetting
@@ -55,6 +56,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val backClick = rememberHapticClick { onBack?.invoke() }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -71,7 +73,7 @@ fun SettingsScreen(
         ) {
             if (onBack != null) {
                 IconButton(
-                    onClick = onBack,
+                    onClick = backClick,
                     modifier = Modifier.align(Alignment.CenterStart)
                 ) {
                     Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
@@ -227,13 +229,14 @@ private fun DeferredSection() {
 
 @Composable
 private fun ToggleRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val hapticChange = rememberHapticClick { onChange(!checked) }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium)
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = { hapticChange() })
     }
 }
 
@@ -264,7 +267,7 @@ private fun <T> ChoiceRow(
                         }
                     )
                     .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.42f), RoundedCornerShape(25.dp))
-                    .clickable { onSelected(value) }
+                    .hapticClickable { onSelected(value) }
                     .padding(horizontal = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

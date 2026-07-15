@@ -44,9 +44,11 @@ class DashcamApiMockWebServerTest {
 
     @Test
     fun getFileListLoopSuccess() = runTest {
-        server.enqueue(json("""{"result":0,"info":[{"name":"/mnt/sdcard/VIDEO_F/20260713_192150_34_f.ts","duration":-1,"size":90112,"createtime":1783970510,"createtimestr":"20260713192150","type":2}]}"""))
+        server.enqueue(json("""{"result":0,"info":[{"folder":"loop","count":1,"files":[{"name":"/mnt/sdcard/VIDEO_F/20260713_192150_34_f.ts","duration":-1,"size":90112,"createtime":1783970510,"createtimestr":"20260713192150","type":2}]}]}"""))
         val response = api.getFileList("loop", 0, 199)
         assertEquals(1, response.info?.size)
+        assertEquals(1, response.info?.single()?.files.orEmpty().size)
+        assertEquals("/mnt/sdcard/VIDEO_F/20260713_192150_34_f.ts", response.info?.single()?.files.orEmpty().single().name)
         assertTrue(server.takeRequest().target.contains("folder=loop"))
     }
 
@@ -70,9 +72,25 @@ class DashcamApiMockWebServerTest {
     }
 
     @Test
+    fun getThumbnailUsesRawDashcamFilePath() = runTest {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body("thumbnail")
+                .build()
+        )
+        api.getThumbnail("/mnt/sdcard/VIDEO_F/20260714_122428_34_f.ts").close()
+        assertEquals(
+            "/app/getthumbnail?file=/mnt/sdcard/VIDEO_F/20260714_122428_34_f.ts",
+            server.takeRequest().target
+        )
+    }
+
+    @Test
     fun deleteSuccess() = runTest {
         server.enqueue(json("""{"result":0,"info":"delete success"}"""))
         assertEquals(0, api.deleteFile("/mnt/sdcard/test.jpg").result)
+        assertEquals("/app/deletefile?file=/mnt/sdcard/test.jpg", server.takeRequest().target)
     }
 
     @Test

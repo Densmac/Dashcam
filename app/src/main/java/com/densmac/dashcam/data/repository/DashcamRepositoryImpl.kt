@@ -65,10 +65,22 @@ class DashcamRepositoryImpl @Inject constructor(
         return safeApiCall({ api.getMediaInfo() }) { required(it.info) }
     }
 
+    override suspend fun getRecDuration(): AppResult<Int> {
+        val bind = ensureBound()
+        if (bind is AppResult.Failure) return bind
+        return safeApiCall({ api.getRecDuration() }) { required(it.info).duration }
+    }
+
     override suspend fun enterRecorder(): AppResult<Unit> {
         val bind = ensureBound()
         if (bind is AppResult.Failure) return bind
         return safeApiCall({ api.enterRecorder() }) { Unit }
+    }
+
+    override suspend fun enterPlayback(): AppResult<Unit> {
+        val bind = ensureBound()
+        if (bind is AppResult.Failure) return bind
+        return safeApiCall({ api.playback("enter") }) { Unit }
     }
 
     override suspend fun exitPlayback(): AppResult<Unit> {

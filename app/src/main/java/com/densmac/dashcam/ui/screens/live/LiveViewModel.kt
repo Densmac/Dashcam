@@ -24,10 +24,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 @HiltViewModel
@@ -46,17 +49,26 @@ class LiveViewModel @Inject constructor(
     val uiState: StateFlow<LiveUiState> = _uiState.asStateFlow()
     private var loadedStatusForDeviceUuid: String? = null
     private var autoStartedForDeviceUuid: String? = null
+    private var wasConnected = false
     private var preferences = UserPreferences()
+    private val previewCommandMutex = Mutex()
 
     init {
         connectionMonitor.startMonitoring()
         viewModelScope.launch {
-            connectionMonitor.connectionState.collectLatest { state ->
+            connectionMonitor.connectionState.collect { state ->
                 _uiState.update { it.copy(connectionState = state) }
-                if (state is DashcamConnectionState.Connected && loadedStatusForDeviceUuid != state.device.uuid) {
-                    loadedStatusForDeviceUuid = state.device.uuid
-                    loadDashcamStatus()
-                    maybeAutoStartPreview(state.device.uuid)
+                if (state is DashcamConnectionState.Connected) {
+                    val shouldRefresh = !wasConnected || loadedStatusForDeviceUuid != state.device.uuid
+                    wasConnected = true
+                    if (shouldRefresh) {
+                        loadedStatusForDeviceUuid = state.device.uuid
+                        loadDashcamStatus()
+                        maybeAutoStartPreview(state.device.uuid)
+                    }
+                } else {
+                    wasConnected = false
+                    autoStartedForDeviceUuid = null
                 }
             }
         }
@@ -114,13 +126,16 @@ class LiveViewModel @Inject constructor(
         }
     }
 
+    fun resumePreview() {
+        viewModelScope.launch {
+            if (_uiState.value.connectionState !is DashcamConnectionState.Connected || isPreviewActive()) return@launch
+            startPreviewInternal()
+        }
+    }
+
     fun switchCamera(camera: DashcamCamera) {
         viewModelScope.launch {
-            _uiState.update { it.copy(busy = true, selectedCamera = camera, message = null) }
-            when (val result = switchCameraUseCase(camera)) {
-                is AppResult.Success -> _uiState.update { it.copy(busy = false) }
-                is AppResult.Failure -> _uiState.update { it.copy(busy = false, message = result.error.userMessage()) }
-            }
+            switchCameraInternal(camera)
         }
     }
 
@@ -165,16 +180,29 @@ class LiveViewModel @Inject constructor(
     }
 
     private suspend fun startPreviewInternal() {
-        _uiState.update { it.copy(busy = true, message = null) }
-        when (val result = prepareLivePreview()) {
-            is AppResult.Success -> {
-                val preferred = _uiState.value.selectedCamera
-                when (val switchResult = switchCameraUseCase(preferred)) {
-                    is AppResult.Success -> _uiState.update { it.copy(busy = false) }
-                    is AppResult.Failure -> _uiState.update { it.copy(busy = false, message = switchResult.error.userMessage()) }
+        previewCommandMutex.withLock {
+            _uiState.update { it.copy(busy = true, message = null) }
+            when (val result = prepareLivePreview()) {
+                is AppResult.Success -> {
+                    val preferred = _uiState.value.selectedCamera
+                    when (val startResult = switchCameraUseCase(preferred)) {
+                        is AppResult.Success -> _uiState.update { it.copy(busy = false) }
+                        is AppResult.Failure -> _uiState.update { it.copy(busy = false, message = startResult.error.userMessage()) }
+                    }
                 }
+                is AppResult.Failure -> _uiState.update { it.copy(busy = false, message = result.error.userMessage()) }
             }
-            is AppResult.Failure -> _uiState.update { it.copy(busy = false, message = result.error.userMessage()) }
+        }
+    }
+
+    private suspend fun switchCameraInternal(camera: DashcamCamera) {
+        previewCommandMutex.withLock {
+            if (camera == _uiState.value.selectedCamera && _uiState.value.previewState == LivePreviewState.Playing) return
+            _uiState.update { it.copy(busy = true, selectedCamera = camera, message = null) }
+            when (val result = switchCameraUseCase(camera)) {
+                is AppResult.Success -> _uiState.update { it.copy(busy = false) }
+                is AppResult.Failure -> _uiState.update { it.copy(busy = false, message = result.error.userMessage()) }
+            }
         }
     }
 
