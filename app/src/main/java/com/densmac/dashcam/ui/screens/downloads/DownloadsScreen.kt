@@ -74,17 +74,6 @@ fun DownloadsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 18.dp)
     ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 8.dp)) {
-                Text("Transfers", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(
-                    transfersSummary(active.size, finished.count { it.status == DownloadStatus.COMPLETED }),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-
         if (state.downloads.isEmpty()) {
             item { EmptyTransfers() }
         }
@@ -123,13 +112,6 @@ fun DownloadsScreen(
             onDismiss = viewModel::dismissDelete
         )
     }
-}
-
-private fun transfersSummary(active: Int, saved: Int): String = when {
-    active > 0 && saved > 0 -> "$active in progress · $saved saved"
-    active > 0 -> "$active in progress"
-    saved > 0 -> "$saved saved"
-    else -> "Nothing here yet"
 }
 
 @Composable

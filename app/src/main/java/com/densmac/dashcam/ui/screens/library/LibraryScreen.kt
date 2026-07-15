@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -37,9 +39,11 @@ import androidx.compose.material.icons.outlined.VideocamOff
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -69,6 +73,7 @@ import com.densmac.dashcam.domain.model.DashcamMediaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     onOpenDetail: (String) -> Unit,
@@ -78,30 +83,9 @@ fun LibraryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 16.dp),
+            .padding(start = 24.dp, end = 24.dp, top = 32.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-        ) {
-            Text(
-                "Vault",
-                modifier = Modifier.align(Alignment.CenterStart),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            Row(
-                modifier = Modifier.align(Alignment.CenterEnd),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (state.loading) CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 3.dp)
-                IconBubble(icon = Icons.Outlined.Refresh, contentDescription = "Refresh", onClick = { viewModel.load() })
-            }
-        }
-
         FolderTabs(selected = state.folder, onSelected = viewModel::load)
 
         if (state.selectionMode) {
@@ -112,31 +96,44 @@ fun LibraryScreen(
             )
         }
 
-        if (!state.loading && state.bundles.isEmpty()) {
-            LibraryStateIcon(
-                connectionIssue = state.message != null,
-                modifier = Modifier.weight(1f)
-            )
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(154.dp),
-                contentPadding = PaddingValues(bottom = 18.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                items(state.bundles, key = { it.id }) { bundle ->
-                    LibraryCard(
-                        bundle = bundle,
-                        selected = bundle.id in state.selectedIds,
-                        onClick = {
-                            if (state.selectionMode) viewModel.toggleSelection(bundle) else onOpenDetail(bundle.id)
-                        },
-                        onLongClick = { viewModel.toggleSelection(bundle) },
-                        onDownload = { viewModel.downloadBundle(bundle) },
-                        onDelete = { viewModel.requestDelete(listOfNotNull(bundle.front, bundle.rear)) },
-                        loadThumbnail = viewModel::loadThumbnail
+        PullToRefreshBox(
+            isRefreshing = state.loading,
+            onRefresh = { viewModel.load() },
+            modifier = Modifier.weight(1f)
+        ) {
+            if (!state.loading && state.bundles.isEmpty()) {
+                // Scrollable so pull-to-refresh gesture works even on the empty state.
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    LibraryStateIcon(
+                        connectionIssue = state.message != null,
+                        modifier = Modifier.fillMaxSize()
                     )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(154.dp),
+                    contentPadding = PaddingValues(bottom = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(state.bundles, key = { it.id }) { bundle ->
+                        LibraryCard(
+                            bundle = bundle,
+                            selected = bundle.id in state.selectedIds,
+                            onClick = {
+                                if (state.selectionMode) viewModel.toggleSelection(bundle) else onOpenDetail(bundle.id)
+                            },
+                            onLongClick = { viewModel.toggleSelection(bundle) },
+                            onDownload = { viewModel.downloadBundle(bundle) },
+                            onDelete = { viewModel.requestDelete(listOfNotNull(bundle.front, bundle.rear)) },
+                            loadThumbnail = viewModel::loadThumbnail
+                        )
+                    }
                 }
             }
         }

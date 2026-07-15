@@ -138,42 +138,7 @@ private fun CinematicLivePanel(
             .fillMaxWidth()
             .defaultMinSize(minHeight = 650.dp)
             .clip(RoundedCornerShape(36.dp))
-            .background(Color(0xFF080806))
-            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(36.dp))
     ) {
-        if (showStatic) {
-            ViewfinderStatic(Modifier.matchParentSize())
-        } else {
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color(0xFFC5784D),
-                                Color(0xFF695733),
-                                Color(0xFF242417),
-                                Color(0xFF080907)
-                            )
-                        )
-                    )
-            )
-        }
-
-        Box(
-            Modifier
-                .matchParentSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.Black.copy(alpha = 0.05f),
-                            Color.Transparent,
-                            Color.Black.copy(alpha = 0.48f)
-                        )
-                    )
-                )
-        )
-
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -240,30 +205,9 @@ private fun CinematicLivePanel(
                     .align(Alignment.CenterEnd)
                     .padding(end = 12.dp)
             )
-
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(14.dp)
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(Color(0xE80B0C08))
-                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(32.dp))
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconDeckButton(Icons.Outlined.PhotoCamera, "Snapshot", onSnapshot)
-                IconDeckButton(Icons.Outlined.FiberManualRecord, "Record") {
-                    onRecording(state.settings?.recordingEnabled != true)
-                }
-                IconDeckButton(Icons.Outlined.Refresh, "Reconnect", onReconnect)
-                IconDeckButton(Icons.Outlined.VideoLibrary, "Library", onOpenLibrary)
-            }
         }
 
-        StorageStrip(state = state, onOpenLibrary = onOpenLibrary)
+        ControlBar(onSnapshot = onSnapshot)
     }
     }
 }
@@ -342,24 +286,6 @@ private fun CameraRail(
 }
 
 @Composable
-private fun IconDeckButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit
-) {
-    val hapticClick = rememberHapticClick(onClick = onClick)
-    IconButton(
-        onClick = hapticClick,
-        modifier = Modifier
-            .size(50.dp)
-            .clip(RoundedCornerShape(25.dp))
-            .background(Color.White.copy(alpha = 0.12f))
-    ) {
-        Icon(icon, contentDescription = contentDescription, tint = Color(0xFFF7E7C7))
-    }
-}
-
-@Composable
 private fun ViewfinderStatic(modifier: Modifier = Modifier) {
     var frame by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
@@ -378,16 +304,24 @@ private fun ViewfinderStatic(modifier: Modifier = Modifier) {
             return ((random ushr 8) and 0xFFFF) / 65_535f
         }
 
-        drawRect(Color.Black.copy(alpha = 0.36f))
+        // Greyish static field (a warm charcoal grey) instead of near-black, so the placeholder
+        // reads as TV-style grain rather than a black void.
+        drawRect(Color(0xFF3A3934))
 
-        val speckles = min(1_000, ((size.width * size.height) / (34.dp.toPx() * 34.dp.toPx())).toInt().coerceAtLeast(220))
+        val speckles = min(1_400, ((size.width * size.height) / (26.dp.toPx() * 26.dp.toPx())).toInt().coerceAtLeast(320))
         repeat(speckles) {
             val x = nextFloat() * size.width
             val sy = nextFloat() * size.height
-            val warm = nextFloat() > 0.28f
-            val alpha = 0.06f + nextFloat() * 0.18f
+            val roll = nextFloat()
+            // Mix light and dark grey grain (plus an occasional warm fleck) for a lively grey noise.
+            val color = when {
+                roll > 0.62f -> Color(0xFFCFCcC4)
+                roll > 0.24f -> Color(0xFF565550)
+                else -> Color(0xFFF7E7C7)
+            }
+            val alpha = 0.10f + nextFloat() * 0.22f
             drawRect(
-                color = (if (warm) Color(0xFFF7E7C7) else Color.White).copy(alpha = alpha),
+                color = color.copy(alpha = alpha),
                 topLeft = Offset(x, sy),
                 size = Size(dot * (1f + nextFloat() * 1.8f), dot)
             )
@@ -396,27 +330,33 @@ private fun ViewfinderStatic(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun StorageStrip(state: LiveUiState, onOpenLibrary: () -> Unit) {
-    val storage = state.storageStatus
+private fun ControlBar(
+    onSnapshot: () -> Unit
+) {
+    // A single, elegant snapshot control — centered, no bar background. Theme-aware so it stays
+    // legible on the light cream background as well as the dark one.
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(76.dp)
-            .clip(RoundedCornerShape(30.dp))
-            .background(Color(0xD012130E))
-            .hapticClickable(onClick = onOpenLibrary)
-            .padding(horizontal = 18.dp),
+            .height(56.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.Center
     ) {
-        Icon(Icons.Outlined.VideoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        if (storage == null) {
-            Text("Vault", color = Color(0xFFF7E7C7), style = MaterialTheme.typography.titleMedium)
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${(storage.usedPercent * 100).toInt()}%", color = Color(0xFFF7E7C7), style = MaterialTheme.typography.headlineMedium)
-                Text(storage.freeMb.mbToDisplayGb(), color = Color(0xFFBFAE8F))
-            }
+        val hapticClick = rememberHapticClick(onClick = onSnapshot)
+        IconButton(
+            onClick = hapticClick,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(26.dp))
+        ) {
+            Icon(
+                Icons.Outlined.PhotoCamera,
+                contentDescription = "Snapshot",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
         }
     }
 }
@@ -430,13 +370,32 @@ private fun PreviewOverlay(
     AnimatedContent(targetState = state, modifier = modifier, label = "preview-state") { previewState ->
         when (previewState) {
             LivePreviewState.Idle,
-            LivePreviewState.Released -> IconDeckButton(Icons.Outlined.PlayArrow, "Start preview", onStart)
+            LivePreviewState.Released -> CenterPreviewButton(Icons.Outlined.PlayArrow, "Start preview", onStart)
             LivePreviewState.Preparing,
             LivePreviewState.Connecting,
             LivePreviewState.Buffering -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            is LivePreviewState.Error -> IconDeckButton(Icons.Outlined.Refresh, "Retry", onStart)
+            is LivePreviewState.Error -> CenterPreviewButton(Icons.Outlined.Refresh, "Retry", onStart)
             LivePreviewState.Playing -> Unit
         }
+    }
+}
+
+@Composable
+private fun CenterPreviewButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    val hapticClick = rememberHapticClick(onClick = onClick)
+    IconButton(
+        onClick = hapticClick,
+        modifier = Modifier
+            .size(62.dp)
+            .clip(RoundedCornerShape(31.dp))
+            .background(Color(0x66000000))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(31.dp))
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = Color(0xFFF7E7C7), modifier = Modifier.size(28.dp))
     }
 }
 
