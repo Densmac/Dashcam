@@ -294,14 +294,12 @@ class MediaFilePlayerController @Inject constructor(
                         // duration). Do NOT force http-continuous — that turns it into a live
                         // stream, disabling Range/seek and breaking A/V sync.
                         //
-                        // Making the stream seekable (via the loopback proxy) makes LibVLC buffer
-                        // less than it did for a "live" stream, so the single-session camera's bursty
-                        // 4K delivery underruns and playback stutters. A deep cache here plus the
-                        // proxy's 48 MB read-ahead ride through the camera's SD-contention gaps for
-                        // smooth continuous play. (Seeks still re-buffer a few seconds — that's
-                        // camera-bound: seeking cold-starts a new transfer at a new byte offset on
-                        // the single-session server — and isn't reduced by lowering this.)
-                        addOption(":network-caching=5000")
+                        // The proxy progressively downloads the clip to local disk and serves LibVLC
+                        // from there, so playback reads from disk (fast, reliable) and the camera's
+                        // SD-contention gaps never reach the player. Smoothness comes from the disk
+                        // buffer, not this cache, so keep the cache small for snappy seeks (any byte
+                        // offset already downloaded is served instantly).
+                        addOption(":network-caching=1500")
                         addOption(":clock-jitter=0")
                     } else {
                         addOption(":file-caching=1500")

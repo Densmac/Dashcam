@@ -20,7 +20,9 @@ data class ClipDetailUiState(
     // local copy instead of re-streaming and can offer "Open externally".
     val downloadedPaths: Map<String, String> = emptyMap(),
     // The user's chosen default external player package (null = show the chooser).
-    val externalPlayerPackage: String? = null
+    val externalPlayerPackage: String? = null,
+    // Bumped each time a download is enqueued, to flash a centered confirmation icon.
+    val downloadQueuedTick: Int = 0
 ) {
     fun localPathFor(file: DashcamFile?): String? = file?.let { downloadedPaths[it.path] }
 

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.DownloadDone
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.OpenInNew
@@ -94,6 +95,7 @@ fun ClipDetailScreen(
     val context = LocalContext.current
     var fullscreen by remember { mutableStateOf(false) }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -110,7 +112,7 @@ fun ClipDetailScreen(
         if (bundle == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (state.loading) {
-                    DashcamLoading(label = "Loading clip…")
+                    DashcamLoading()
                 } else {
                     Text("Clip not found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -172,6 +174,11 @@ fun ClipDetailScreen(
                 Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
+    }
+        DownloadQueuedConfirmation(
+            tick = state.downloadQueuedTick,
+            modifier = Modifier.align(Alignment.Center)
+        )
     }
 
     DisposableEffect(Unit) { onDispose { viewModel.stopStream() } }
@@ -505,6 +512,41 @@ private fun ActionBar(
                 .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.32f))
         ) {
             Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/** A brief centered icon that confirms a download was queued (replaces a text notice). */
+@Composable
+private fun DownloadQueuedConfirmation(tick: Int, modifier: Modifier = Modifier) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) {
+        if (tick > 0) {
+            visible = true
+            delay(1300)
+            visible = false
+        }
+    }
+    androidx.compose.animation.AnimatedVisibility(
+        visible = visible,
+        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.7f),
+        exit = androidx.compose.animation.fadeOut(),
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .size(104.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color(0xE6141210))
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Outlined.DownloadDone,
+                contentDescription = "Download queued",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(46.dp)
+            )
         }
     }
 }

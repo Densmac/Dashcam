@@ -236,7 +236,8 @@ class ClipDetailViewModel @Inject constructor(
                     return@launch
                 }
             }
-            _uiState.update { it.copy(message = AppNotice.DownloadQueued.userMessage()) }
+            // Flash a centered confirmation icon instead of a text notice.
+            _uiState.update { it.copy(message = null, downloadQueuedTick = it.downloadQueuedTick + 1) }
         }
     }
 
