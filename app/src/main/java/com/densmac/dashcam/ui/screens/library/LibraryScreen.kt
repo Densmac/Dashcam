@@ -77,6 +77,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun LibraryScreen(
     onOpenDetail: (String) -> Unit,
+    onDownloadEnqueued: () -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -129,7 +130,10 @@ fun LibraryScreen(
                                 if (state.selectionMode) viewModel.toggleSelection(bundle) else onOpenDetail(bundle.id)
                             },
                             onLongClick = { viewModel.toggleSelection(bundle) },
-                            onDownload = { viewModel.downloadBundle(bundle) },
+                            onDownload = {
+                                viewModel.downloadBundle(bundle)
+                                onDownloadEnqueued()
+                            },
                             onDelete = { viewModel.requestDelete(listOfNotNull(bundle.front, bundle.rear)) },
                             loadThumbnail = viewModel::loadThumbnail
                         )

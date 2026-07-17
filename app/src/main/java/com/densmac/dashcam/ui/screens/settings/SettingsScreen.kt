@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -51,8 +53,11 @@ import com.densmac.dashcam.core.design.components.DashcamButton
 import com.densmac.dashcam.core.design.components.DashcamButtonStyle
 import com.densmac.dashcam.core.design.components.GlassCard
 import com.densmac.dashcam.core.design.components.SectionHeader
+import androidx.compose.ui.platform.LocalContext
 import com.densmac.dashcam.core.design.haptics.hapticClickable
 import com.densmac.dashcam.core.design.haptics.rememberHapticClick
+import com.densmac.dashcam.ui.media.appLabel
+import com.densmac.dashcam.ui.media.videoPlayerApps
 import com.densmac.dashcam.domain.model.DashcamConnectionState
 import com.densmac.dashcam.domain.model.LevelSetting
 import com.densmac.dashcam.domain.model.LoopDuration
@@ -344,6 +349,8 @@ private fun WifiPasswordDialog(onConfirm: (String) -> Unit, onDismiss: () -> Uni
 
 @Composable
 private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewModel) {
+    val context = LocalContext.current
+    var showPlayerPicker by remember { mutableStateOf(false) }
     GlassCard {
         SectionHeader("Appearance")
         Spacer(Modifier.height(6.dp))
@@ -352,6 +359,62 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
         ToggleRow("Haptics", state.preferences.hapticsEnabled, viewModel::setHaptics)
         ToggleRow("Auto-start live preview", state.preferences.autoStartLivePreview, viewModel::setAutoStart)
         ToggleRow("Swap front/rear labels", state.preferences.cameraMappingSwapped, viewModel::setSwapCamera)
+        NavRow(
+            title = "Default player",
+            value = appLabel(context, state.preferences.externalPlayerPackage) ?: "Always ask",
+            enabled = true,
+            onClick = { showPlayerPicker = true }
+        )
+    }
+    if (showPlayerPicker) {
+        ExternalPlayerPickerDialog(
+            context = context,
+            current = state.preferences.externalPlayerPackage,
+            onPick = { viewModel.setExternalPlayer(it); showPlayerPicker = false },
+            onDismiss = { showPlayerPicker = false }
+        )
+    }
+}
+
+@Composable
+private fun ExternalPlayerPickerDialog(
+    context: android.content.Context,
+    current: String?,
+    onPick: (String?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val apps = remember { videoPlayerApps(context) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Default player") },
+        text = {
+            Column {
+                PickerRow("Always ask", selected = current == null) { onPick(null) }
+                apps.forEach { app ->
+                    PickerRow(app.label, selected = current == app.packageName) { onPick(app.packageName) }
+                }
+                if (apps.isEmpty()) {
+                    Text("No video apps installed.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
+}
+
+@Composable
+private fun PickerRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .hapticClickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = MaterialTheme.colorScheme.onSurface)
+        if (selected) Icon(Icons.Outlined.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
     }
 }
 

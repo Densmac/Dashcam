@@ -10,7 +10,8 @@ data class UserPreferences(
     val autoStartLivePreview: Boolean = false,
     val showDebugDiagnostics: Boolean = false,
     val cameraMappingSwapped: Boolean = false,
-    val lastKnownDeviceUuid: String? = null
+    val lastKnownDeviceUuid: String? = null,
+    val externalPlayerPackage: String? = null
 )
 
 enum class ThemeMode {

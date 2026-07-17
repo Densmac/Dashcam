@@ -27,6 +27,7 @@ class UserPreferencesDataSource @Inject constructor(
         val showDebugDiagnostics = booleanPreferencesKey("show_debug_diagnostics")
         val cameraMappingSwapped = booleanPreferencesKey("camera_mapping_swapped")
         val lastKnownDeviceUuid = stringPreferencesKey("last_known_device_uuid")
+        val externalPlayerPackage = stringPreferencesKey("external_player_package")
     }
 
     val preferences: Flow<UserPreferences> = context.userPreferencesStore.data.map { prefs ->
@@ -38,7 +39,8 @@ class UserPreferencesDataSource @Inject constructor(
             autoStartLivePreview = prefs[Keys.autoStartLivePreview] ?: false,
             showDebugDiagnostics = prefs[Keys.showDebugDiagnostics] ?: false,
             cameraMappingSwapped = prefs[Keys.cameraMappingSwapped] ?: false,
-            lastKnownDeviceUuid = prefs[Keys.lastKnownDeviceUuid]
+            lastKnownDeviceUuid = prefs[Keys.lastKnownDeviceUuid],
+            externalPlayerPackage = prefs[Keys.externalPlayerPackage]
         )
     }
 
@@ -50,4 +52,7 @@ class UserPreferencesDataSource @Inject constructor(
     suspend fun setCameraMappingSwapped(value: Boolean) = context.userPreferencesStore.edit { it[Keys.cameraMappingSwapped] = value }
     suspend fun setPreferredCamera(value: DashcamCamera) = context.userPreferencesStore.edit { it[Keys.preferredCamera] = value.name }
     suspend fun setLastKnownDeviceUuid(value: String) = context.userPreferencesStore.edit { it[Keys.lastKnownDeviceUuid] = value }
+    suspend fun setExternalPlayerPackage(value: String?) = context.userPreferencesStore.edit {
+        if (value == null) it.remove(Keys.externalPlayerPackage) else it[Keys.externalPlayerPackage] = value
+    }
 }

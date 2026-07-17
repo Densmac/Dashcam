@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +15,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,9 +27,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -35,11 +41,16 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,12 +63,20 @@ import com.densmac.dashcam.core.design.components.ConfirmDangerDialog
 import com.densmac.dashcam.core.design.components.DashcamButton
 import com.densmac.dashcam.core.design.components.DashcamButtonStyle
 import com.densmac.dashcam.core.design.components.GlassCard
+import com.densmac.dashcam.core.design.haptics.HapticEvent
+import com.densmac.dashcam.core.design.haptics.LocalDashcamHapticsEnabled
 import com.densmac.dashcam.core.design.haptics.hapticClickable
+import com.densmac.dashcam.core.design.haptics.rememberDashcamHaptics
 import com.densmac.dashcam.core.design.haptics.rememberHapticClick
 import com.densmac.dashcam.core.player.MediaPlaybackState
 import com.densmac.dashcam.domain.model.DownloadItem
 import com.densmac.dashcam.domain.model.DownloadStatus
+import com.densmac.dashcam.ui.media.MediaScrubber
+import com.densmac.dashcam.ui.media.PlaybackOverlay
 import com.densmac.dashcam.ui.media.openDashcamFileExternally
+import com.densmac.dashcam.ui.media.rememberSwipeZoom
+import com.densmac.dashcam.ui.media.shareDashcamFile
+import com.densmac.dashcam.ui.media.swipeZoom
 
 @Composable
 fun DownloadsScreen(
@@ -81,24 +100,33 @@ fun DownloadsScreen(
         if (active.isNotEmpty()) {
             item { GroupLabel("In progress") }
             items(active, key = { it.id }) { item ->
-                TransferCard(item, viewModel)
+                TransferCard(item, state.externalPlayerPackage, viewModel)
             }
         }
         if (finished.isNotEmpty()) {
             item { GroupLabel("Saved") }
             items(finished, key = { it.id }) { item ->
-                TransferCard(item, viewModel)
+                TransferCard(item, state.externalPlayerPackage, viewModel)
             }
         }
     }
 
     state.playing?.let { item ->
+        val progress by viewModel.mediaPlayer.progress.collectAsStateWithLifecycle()
         LocalPlayerDialog(
             item = item,
             playbackState = state.playbackState,
+            progress = progress,
+            externalPlayerPackage = state.externalPlayerPackage,
             onClose = viewModel::closePlayer,
             onRetry = viewModel::retryPlayback,
             onTogglePlayPause = viewModel::togglePlayPause,
+            onReplay = viewModel::replay,
+            onSwipeNext = viewModel::playNext,
+            onSwipePrevious = viewModel::playPrevious,
+            onScrubStart = viewModel::beginScrub,
+            onScrubMove = viewModel::previewScrub,
+            onScrubEnd = viewModel::seekTo,
             attachPlayer = { host -> viewModel.mediaPlayer.attach(host) }
         )
     }
@@ -126,7 +154,7 @@ private fun GroupLabel(text: String) {
 }
 
 @Composable
-private fun TransferCard(item: DownloadItem, viewModel: DownloadsViewModel) {
+private fun TransferCard(item: DownloadItem, externalPlayerPackage: String?, viewModel: DownloadsViewModel) {
     val context = LocalContext.current
     val completed = item.status == DownloadStatus.COMPLETED
     val isActive = item.status in setOf(DownloadStatus.QUEUED, DownloadStatus.RUNNING, DownloadStatus.PAUSED)
@@ -186,7 +214,8 @@ private fun TransferCard(item: DownloadItem, viewModel: DownloadsViewModel) {
             when {
                 completed -> {
                     DashcamButton("Play", { viewModel.play(item) }, icon = Icons.Outlined.PlayArrow, modifier = Modifier.weight(1f))
-                    DashcamButton("Open", { openDashcamFileExternally(context, item.localPath) }, icon = Icons.Outlined.OpenInNew, style = DashcamButtonStyle.Tonal, modifier = Modifier.weight(1f))
+                    CircleIconButton(Icons.Outlined.Share, "Share", { shareDashcamFile(context, item.localPath) })
+                    CircleIconButton(Icons.Outlined.OpenInNew, "Open externally", { openDashcamFileExternally(context, item.localPath, externalPlayerPackage) })
                 }
                 item.status == DownloadStatus.FAILED ->
                     DashcamButton("Retry", { viewModel.retry(item.id) }, icon = Icons.Outlined.Refresh, modifier = Modifier.weight(1f))
@@ -202,6 +231,9 @@ private fun TransferCard(item: DownloadItem, viewModel: DownloadsViewModel) {
         }
     }
 }
+
+// Horizontal drag distance (px) that commits a prev/next saved-clip swipe.
+private const val DOWNLOAD_SWIPE_THRESHOLD_PX = 120f
 
 private fun progressLabel(item: DownloadItem): String {
     val pct = (item.progress * 100).toInt()
@@ -292,76 +324,151 @@ private fun EmptyTransfers() {
 private fun LocalPlayerDialog(
     item: DownloadItem,
     playbackState: MediaPlaybackState,
+    progress: com.densmac.dashcam.core.player.MediaProgress,
+    externalPlayerPackage: String?,
     onClose: () -> Unit,
     onRetry: () -> Unit,
     onTogglePlayPause: () -> Unit,
+    onReplay: () -> Unit,
+    onSwipeNext: () -> Unit,
+    onSwipePrevious: () -> Unit,
+    onScrubStart: () -> Unit,
+    onScrubMove: (Float) -> Unit,
+    onScrubEnd: (Float) -> Unit,
     attachPlayer: (FrameLayout) -> Unit
 ) {
     val context = LocalContext.current
+    val zoom = rememberSwipeZoom()
+    val haptics = rememberDashcamHaptics(LocalDashcamHapticsEnabled.current)
+    var landscape by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // Force landscape while the fullscreen toggle is on; restore on exit.
+        if (landscape) {
+            DisposableEffect(Unit) {
+                val activity = context.findActivity()
+                val previous = activity?.requestedOrientation
+                activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                onDispose {
+                    activity?.requestedOrientation = previous ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                }
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xF2050505))
         ) {
             Column(Modifier.fillMaxSize()) {
+                // Presentable header bar so the clip name reads as a title, not floating text.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .background(Color(0x33000000))
+                        .statusBarsPadding()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = rememberHapticClick(onClick = onClose)) {
                         Icon(Icons.Outlined.Close, contentDescription = "Close", tint = Color(0xFFF7E7C7))
                     }
-                    Text(
-                        item.remotePath.substringAfterLast('/'),
-                        color = Color(0xFFF7E7C7),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = rememberHapticClick(onClick = { openDashcamFileExternally(context, item.localPath) })) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            prettyClipName(item.remotePath),
+                            color = Color(0xFFF7E7C7),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                        Text(
+                            "${item.folder.displayName} · ${item.camera?.displayName ?: "Recording"}",
+                            color = Color(0xFFBFAE8F),
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1
+                        )
+                    }
+                    IconButton(onClick = rememberHapticClick(onClick = { landscape = !landscape })) {
+                        Icon(
+                            if (landscape) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
+                            contentDescription = if (landscape) "Exit fullscreen" else "Fullscreen",
+                            tint = Color(0xFFF7E7C7)
+                        )
+                    }
+                    IconButton(onClick = rememberHapticClick(onClick = { openDashcamFileExternally(context, item.localPath, externalPlayerPackage) })) {
                         Icon(Icons.Outlined.OpenInNew, contentDescription = "Open externally", tint = Color(0xFFF7E7C7))
                     }
                 }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
+                        .weight(1f)
+                        // Swipe across the video to move to the previous / next saved clip.
+                        .pointerInput(Unit) {
+                            var totalDrag = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { totalDrag = 0f },
+                                onDragEnd = {
+                                    if (totalDrag <= -DOWNLOAD_SWIPE_THRESHOLD_PX) {
+                                        haptics(HapticEvent.Confirmation); zoom.animate(1) { onSwipeNext() }
+                                    } else if (totalDrag >= DOWNLOAD_SWIPE_THRESHOLD_PX) {
+                                        haptics(HapticEvent.Confirmation); zoom.animate(-1) { onSwipePrevious() }
+                                    }
+                                }
+                            ) { _, dragAmount -> totalDrag += dragAmount }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    AndroidView(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f),
-                        factory = { ctx -> FrameLayout(ctx).also(attachPlayer) }
-                    )
-                    when (playbackState) {
-                        MediaPlaybackState.Opening,
-                        MediaPlaybackState.Buffering ->
-                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                        is MediaPlaybackState.Error ->
-                            IconButton(
-                                onClick = rememberHapticClick(onClick = onRetry),
-                                modifier = Modifier.size(64.dp).clip(CircleShape).background(Color(0x66000000))
-                            ) { Icon(Icons.Outlined.Refresh, "Retry", tint = Color(0xFFF7E7C7), modifier = Modifier.size(30.dp)) }
-                        MediaPlaybackState.Paused ->
-                            IconButton(
-                                onClick = rememberHapticClick(onClick = onTogglePlayPause),
-                                modifier = Modifier.size(64.dp).clip(CircleShape).background(Color(0x66000000))
-                            ) { Icon(Icons.Outlined.PlayArrow, "Play", tint = Color(0xFFF7E7C7), modifier = Modifier.size(30.dp)) }
-                        MediaPlaybackState.Playing ->
-                            // Tap the video to pause; keep the surface clean while playing.
-                            Box(
-                                Modifier
-                                    .fillMaxSize()
-                                    .hapticClickable(onClick = onTogglePlayPause)
-                            )
-                        else -> Unit
+                    // Zoom transition transform applied to the video + overlay.
+                    Box(
+                        modifier = Modifier.swipeZoom(zoom),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AndroidView(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f),
+                            factory = { ctx -> FrameLayout(ctx).also(attachPlayer) }
+                        )
+                        // Same auto-fading play/pause/replay control as the clip viewer.
+                        PlaybackOverlay(
+                            playbackState = playbackState,
+                            streaming = true,
+                            onTogglePlayPause = onTogglePlayPause,
+                            onReplay = onReplay,
+                            onRetry = onRetry,
+                            onPlaySelected = {},
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                        )
                     }
                 }
+                MediaScrubber(
+                    progress = progress,
+                    onScrubStart = onScrubStart,
+                    onScrubMove = onScrubMove,
+                    onScrubEnd = onScrubEnd,
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                )
             }
         }
     }
+}
+
+private fun android.content.Context.findActivity(): android.app.Activity? {
+    var ctx = this
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is android.app.Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+/** Turn a raw dashcam filename (e.g. 20260716_194811_14_f.ts) into a readable title. */
+private fun prettyClipName(remotePath: String): String {
+    val base = remotePath.substringAfterLast('/').removeSuffix(".ts")
+    val match = Regex("(\\d{4})(\\d{2})(\\d{2})_(\\d{2})(\\d{2})(\\d{2})").find(base) ?: return base
+    val (y, mo, d, h, mi, s) = match.destructured
+    return "$y-$mo-$d · $h:$mi:$s"
 }

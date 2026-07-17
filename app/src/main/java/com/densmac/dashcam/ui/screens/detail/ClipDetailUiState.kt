@@ -18,7 +18,9 @@ data class ClipDetailUiState(
     val playbackState: MediaPlaybackState = MediaPlaybackState.Idle,
     // Completed downloads keyed by remote path -> local file path, so the viewer can play the
     // local copy instead of re-streaming and can offer "Open externally".
-    val downloadedPaths: Map<String, String> = emptyMap()
+    val downloadedPaths: Map<String, String> = emptyMap(),
+    // The user's chosen default external player package (null = show the chooser).
+    val externalPlayerPackage: String? = null
 ) {
     fun localPathFor(file: DashcamFile?): String? = file?.let { downloadedPaths[it.path] }
 

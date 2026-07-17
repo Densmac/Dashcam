@@ -30,7 +30,7 @@ object DashcamConstants {
     const val ENDPOINT_DELETE_FILE = "app/deletefile"
 
     const val HTTP_TIMEOUT_SECONDS = 8L
-    const val DOWNLOAD_TIMEOUT_SECONDS = 30L
+    const val DOWNLOAD_TIMEOUT_SECONDS = 45L
     const val STREAM_START_TIMEOUT_MS = 5_000L
     const val DEVICE_POLL_INTERVAL_MS = 2_500L
     const val LIVE_RECONNECT_DELAY_MS = 1_500L

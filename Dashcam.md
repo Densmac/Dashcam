@@ -1,10 +1,74 @@
 # Dashcam Implementation Audit And Handoff Spec
 
-Last updated: 2026-07-14
+Last updated: 2026-07-16
 
-This file describes the Android app as implemented in this repository. It is
-also a handoff note for the next agent. Treat this as current implementation
-state, not an aspirational product brief.
+This file describes the Android app as implemented in this repository. It is an
+audit reference for external reviewers and a handoff note for the next agent.
+Treat this as current implementation state, not an aspirational product brief.
+Sections further down retain the original protocol-discovery and debugging notes;
+the "Feature Inventory" and "Verification Status" sections below are the current
+top-level summary.
+
+## Feature Inventory (2026-07-16)
+
+What the app does today, for auditors:
+
+```text
+Live preview:
+  RTSP-over-TCP live view via LibVLC (video only; malformed AAC audio disabled).
+  Front/rear camera switch performed in-place on the single live RTSP session.
+  Auto-resume of the last feed when returning to the Live tab.
+
+Library ("Vault"):
+  Lists Loop / Event / Park / SOS / Race folders; pairs front+rear by timestamp.
+  Split front/rear thumbnails with a ViewModel-owned cache.
+  Pull-to-refresh (Material3). Per-card download and delete; long-press selection.
+
+In-app media viewer (per clip):
+  Streams a recording directly from the camera over HTTP (no download required).
+  Plays already-downloaded files locally (no network).
+  Front/rear side toggle inside the viewer.
+  Fullscreen landscape mode with the video surface re-parented into fullscreen.
+  "Open externally" via ACTION_VIEW + FileProvider (video/mp2t for .ts).
+
+Transfers (downloads):
+  WorkManager-backed background downloads to app-scoped external storage.
+  In-app playback of completed files, share (ACTION_SEND), open-externally, delete.
+  Sectioned In-progress / Saved lists with smooth animated progress.
+
+Device management (reverse-engineered from the vendor app; see protocol section):
+  Change Wi-Fi SSID, change Wi-Fi password, format SD card (double-confirmed).
+  Existing settings: recording on/off, loop duration, mic, OSD, speaker, G-sensor,
+  timelapse; snapshot; start/stop recording.
+
+App/UX:
+  In-app theme switch (Light / Dark / System) persisted via DataStore; app-wide.
+  Material 3, light + dark, optional dynamic color, haptics.
+  Minimalist top bar (brand mark + centered theme switch + settings).
+```
+
+## Verification Status (2026-07-16)
+
+```text
+Build: ./gradlew --no-configuration-cache :app:compileDebugKotlin \
+       :app:testDebugUnitTest :app:assembleDebug   => BUILD SUCCESSFUL
+
+Automated tests:
+  Unit tests (JVM): API mapping, nested getfilelist parsing, raw-slash thumbnail/delete
+    query regression, front/rear bundling, settings mapping.
+  Instrumented tests (androidTest, real device): device-attr, SD present, recorder+mediainfo,
+    RTSP OPTIONS on :554, raw-slash thumbnail returns real bytes, WorkManager HiltWorkerFactory
+    guard. Result on device 2026-07-15: OK (7 tests).
+
+On-device verified: live resume, in-place camera switch (rapid F/R without feed death),
+  downloads complete with byte-exact files, thumbnail persistence, in-app streaming (4K .ts),
+  local playback, open-externally, theme switch + persistence, settings render.
+
+Not yet runtime-verified against the camera (built + unit-safe, pending a reconnect):
+  Wi-Fi SSID/password change and SD format via the app's own UI; fullscreen rotation;
+  Transfers share sheet; the download-hardening behavior under load.
+```
+
 
 ## Current Status Summary
 
@@ -29,22 +93,8 @@ HTTP: OkHttp + Retrofit + Gson
 Live preview: LibVLC, RTSP over TCP, video-only
 ```
 
-Latest known build state:
-
-```text
-Last successful full build/test before the final live-tab resume patch:
-./gradlew --no-configuration-cache :app:compileDebugKotlin :app:testDebugUnitTest :app:assembleDebug
-
-Result: BUILD SUCCESSFUL
-
-Important: after that successful build, additional source changes were made to:
-- LiveScreen.kt
-- LiveViewModel.kt
-- RtspLivePreviewController.kt
-- AppNavGraph.kt
-
-Those latest changes must be rebuilt and installed before runtime testing.
-```
+Latest build state: BUILD SUCCESSFUL (see the Verification Status section above for the
+current command and test results).
 
 Device context from the active debugging session:
 
@@ -637,6 +687,27 @@ Fix: added a <provider androidx.startup.InitializationProvider tools:node="merge
 Verified: tap -> worker created via Hilt -> bind -> GET raw /mnt/sdcard/... -> HTTP 200 ->
 write .partial -> rename to final .ts. A 136 MB rear file completed with exact byte count.
 Guarded by WorkManagerConfigInstrumentedTest.
+```
+
+Download robustness hardening (2026-07-16, built + unit-safe; load behavior not yet
+re-verified on device):
+
+```text
+The camera is a single-session HTTP server, so concurrent raw GETs (front+rear bundle) plus
+Library thumbnail reads previously caused mid-download stalls and read timeouts. Hardening:
+
+- Serialized transfers: DownloadCoordinator (a process-wide Semaphore(1)); each worker runs
+  its transfer inside withTransferSlot, so only one download is active at a time.
+- In-run read retries: a stalled read retries up to 4x with a 1.5s pause, resuming from the
+  .partial file via a Range request, instead of bouncing straight to WorkManager backoff.
+- Faster WorkManager backoff: LINEAR 10s (was the 30s exponential default).
+- Thumbnail throttle: LibraryViewModel calls DownloadCoordinator.awaitTransfersIdle(5s) before
+  each thumbnail fetch, so browsing yields to an active transfer.
+- Longer read/write timeout: 45s (was 30s); bounded attempts: after 8 WorkManager attempts the
+  item surfaces a clean FAILED state with a Retry action rather than retrying forever.
+
+Net: while dashcam Wi-Fi stays connected, a download runs as one serialized transfer that rides
+through transient stalls in place, and only fails after real, repeated errors.
 ```
 
 Suggested download verification:

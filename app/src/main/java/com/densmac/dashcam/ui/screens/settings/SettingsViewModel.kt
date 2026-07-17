@@ -2,6 +2,7 @@ package com.densmac.dashcam.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.densmac.dashcam.core.common.AppError
 import com.densmac.dashcam.core.common.AppResult
 import com.densmac.dashcam.core.common.userMessage
 import com.densmac.dashcam.core.network.DashcamConnectionMonitor
@@ -52,16 +53,21 @@ class SettingsViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, message = null) }
+            _uiState.update { it.copy(loading = true) }
             val settings = settingsRepository.getSettings()
             val storage = dashcamRepository.getStorageStatus()
-            _uiState.update {
-                it.copy(
+            _uiState.update { st ->
+                // Connection-state errors are already shown by the Connection card, so don't
+                // echo them at the bottom. Reserve the bottom message for real action feedback.
+                val error = (settings as? AppResult.Failure)?.error ?: (storage as? AppResult.Failure)?.error
+                val actionableError = error
+                    ?.takeUnless { it is AppError.NotConnectedToDashcam || it is AppError.DashcamApiUnreachable }
+                    ?.userMessage()
+                st.copy(
                     loading = false,
                     dashcamSettings = (settings as? AppResult.Success)?.data,
                     storageStatus = (storage as? AppResult.Success)?.data,
-                    message = (settings as? AppResult.Failure)?.error?.userMessage()
-                        ?: (storage as? AppResult.Failure)?.error?.userMessage()
+                    message = actionableError ?: st.message
                 )
             }
         }
@@ -140,6 +146,7 @@ class SettingsViewModel @Inject constructor(
     fun setAutoStart(value: Boolean) = viewModelScope.launch { preferencesDataSource.setAutoStartLivePreview(value) }
     fun setDiagnostics(value: Boolean) = viewModelScope.launch { preferencesDataSource.setShowDebugDiagnostics(value) }
     fun setSwapCamera(value: Boolean) = viewModelScope.launch { preferencesDataSource.setCameraMappingSwapped(value) }
+    fun setExternalPlayer(packageName: String?) = viewModelScope.launch { preferencesDataSource.setExternalPlayerPackage(packageName) }
 
     private fun setRecording(enabled: Boolean) {
         updateAndRefresh { recordingUseCase(enabled).let { if (it is AppResult.Success) AppResult.Success(Unit) else it as AppResult.Failure } }

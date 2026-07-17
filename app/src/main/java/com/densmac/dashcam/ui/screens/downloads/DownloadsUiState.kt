@@ -9,7 +9,9 @@ data class DownloadsUiState(
     val message: String? = null,
     // In-app playback of a completed local download (null = player closed).
     val playing: DownloadItem? = null,
-    val playbackState: MediaPlaybackState = MediaPlaybackState.Idle
+    val playbackState: MediaPlaybackState = MediaPlaybackState.Idle,
+    // The user's chosen default external player package (null = show the chooser).
+    val externalPlayerPackage: String? = null
 ) {
     val activeDownloads: List<DownloadItem>
         get() = downloads.filter { it.status.isActive }

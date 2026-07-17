@@ -50,6 +50,9 @@ class LiveViewModel @Inject constructor(
     private var loadedStatusForDeviceUuid: String? = null
     private var autoStartedForDeviceUuid: String? = null
     private var wasConnected = false
+    // True when a live preview was on screen at the moment Wi-Fi dropped, so we can bring it back on
+    // reconnect even if auto-start-preview is off.
+    private var resumePreviewOnReconnect = false
     private var preferences = UserPreferences()
     private val previewCommandMutex = Mutex()
 
@@ -64,9 +67,17 @@ class LiveViewModel @Inject constructor(
                     if (shouldRefresh) {
                         loadedStatusForDeviceUuid = state.device.uuid
                         loadDashcamStatus()
-                        maybeAutoStartPreview(state.device.uuid)
+                        if (resumePreviewOnReconnect) {
+                            resumePreviewOnReconnect = false
+                            autoStartedForDeviceUuid = state.device.uuid
+                            startPreviewInternal()
+                        } else {
+                            maybeAutoStartPreview(state.device.uuid)
+                        }
                     }
                 } else {
+                    // Note whether the user was watching live at the moment of the drop.
+                    if (wasConnected && isPreviewActive()) resumePreviewOnReconnect = true
                     wasConnected = false
                     autoStartedForDeviceUuid = null
                 }

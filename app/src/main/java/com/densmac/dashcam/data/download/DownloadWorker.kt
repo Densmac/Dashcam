@@ -20,11 +20,13 @@ import com.densmac.dashcam.domain.model.DownloadStatus
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 @HiltWorker
 class DownloadWorker @AssistedInject constructor(
@@ -35,6 +37,7 @@ class DownloadWorker @AssistedInject constructor(
     private val downloadDao: DownloadDao,
     private val networkBinder: DashcamNetworkBinder,
     private val notificationHelper: DownloadNotificationHelper,
+    private val coordinator: DownloadCoordinator,
     private val dispatchers: DispatchersProvider
 ) : CoroutineWorker(context, params) {
     object Keys {
@@ -43,15 +46,29 @@ class DownloadWorker @AssistedInject constructor(
         const val LOCAL_PATH = "local_path"
     }
 
+    private sealed interface TransferOutcome {
+        data object Completed : TransferOutcome
+        data object Cancelled : TransferOutcome
+        data class HttpError(val message: String) : TransferOutcome
+    }
+
     override suspend fun doWork(): Result = withContext(dispatchers.io) {
         val id = inputData.getString(Keys.DOWNLOAD_ID) ?: return@withContext Result.failure()
         val remotePath = inputData.getString(Keys.REMOTE_PATH) ?: return@withContext Result.failure()
         val localPath = inputData.getString(Keys.LOCAL_PATH) ?: return@withContext Result.failure()
 
+        val finalFile = File(localPath)
+        val partialFile = File("$localPath.partial")
+
+        // Stop retrying forever: after enough WorkManager attempts, surface a clean Failed state.
+        if (runAttemptCount >= MAX_WORK_ATTEMPTS) {
+            Logger.d("DownloadWorker giving up after $runAttemptCount attempts: id=$id")
+            markFailedUnlessCancelled(id, AppError.DownloadFailed.userMessage())
+            return@withContext Result.failure()
+        }
+
         try {
-            Logger.d("DownloadWorker starting: id=$id remote=$remotePath local=$localPath")
-            val finalFile = File(localPath)
-            val partialFile = File("$localPath.partial")
+            Logger.d("DownloadWorker starting: id=$id remote=$remotePath local=$localPath attempt=$runAttemptCount")
             finalFile.parentFile?.mkdirs()
 
             if (downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.RUNNING, System.currentTimeMillis(), null) == 0) {
@@ -66,88 +83,55 @@ class DownloadWorker @AssistedInject constructor(
                 return@withContext Result.retry()
             }
             Logger.d("DownloadWorker bound to dashcam network")
-            val playback = safeApiCall({ api.playback("enter") }) { Unit }
-            if (playback is AppResult.Failure) {
-                Logger.d("DownloadWorker playback enter failed: ${playback.error}")
-                downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.FAILED, System.currentTimeMillis(), playback.error.userMessage())
-                return@withContext Result.retry()
-            }
-            val url = DashcamConstants.HTTP_BASE_URL + remotePath.removePrefix("/")
-            Logger.d("DownloadWorker requesting: $url")
-            var existing = partialFile.takeIf { it.exists() }?.length() ?: 0L
-            var request = Request.Builder().url(url).apply {
-                if (existing > 0) header("Range", "bytes=$existing-")
-            }.build()
-            var response = client.newCall(request).execute()
-            Logger.d("DownloadWorker response: code=${response.code} contentLength=${response.body?.contentLength()}")
-            if (existing > 0 && response.code == 200) {
-                response.close()
-                if (partialFile.exists() && !partialFile.delete()) error("Could not reset partial download")
-                existing = 0L
-                request = Request.Builder().url(url).build()
-                response = client.newCall(request).execute()
-                Logger.d("DownloadWorker restarted response: code=${response.code} contentLength=${response.body?.contentLength()}")
-            }
-            if (!response.isSuccessful) {
-                downloadDao.updateStatusUnlessCancelled(
-                    id,
-                    DownloadStatus.FAILED,
-                    System.currentTimeMillis(),
-                    AppError.HttpError(response.code, null).userMessage()
-                )
-                return@withContext Result.retry()
-            }
-            response.use { res ->
-                val body = res.body ?: error("Empty body")
-                val contentLength = body.contentLength().takeIf { it > 0 }
-                val totalBytes = contentLength?.let { it + existing }
-                var downloaded = existing
-                body.byteStream().use { input ->
-                    FileOutputStream(partialFile, existing > 0).buffered(128 * 1024).use { output ->
-                        val buffer = ByteArray(128 * 1024)
-                        var nextUpdate = downloaded + 512 * 1024
-                        while (true) {
+
+            // Serialize the transfer: the camera is single-session, so only one download runs at
+            // a time. Others queue here instead of contending and stalling each other.
+            coordinator.withTransferSlot {
+                val playback = safeApiCall({ api.playback("enter") }) { Unit }
+                if (playback is AppResult.Failure) {
+                    Logger.d("DownloadWorker playback enter failed: ${playback.error}")
+                    downloadDao.updateStatusUnlessCancelled(id, DownloadStatus.FAILED, System.currentTimeMillis(), playback.error.userMessage())
+                    return@withTransferSlot Result.retry()
+                }
+
+                val url = DashcamConstants.HTTP_BASE_URL + remotePath.removePrefix("/")
+                Logger.d("DownloadWorker requesting: $url")
+
+                // In-run retries: a transient stall resumes from the .partial file instead of
+                // bouncing out to WorkManager's backoff, so an alive-but-slow camera keeps going.
+                var readAttempt = 0
+                while (true) {
+                    val outcome = runCatching { transferOnce(id, url, partialFile) }.getOrElse { throwable ->
+                        if (throwable is CancellationException) throw throwable
+                        if (throwable !is IOException) throw throwable
+                        null // transient network stall
+                    }
+                    when (outcome) {
+                        TransferOutcome.Completed -> return@withTransferSlot finalize(id, partialFile, finalFile)
+                        TransferOutcome.Cancelled -> {
+                            markCancelledIfExplicit(id)
+                            return@withTransferSlot Result.failure()
+                        }
+                        is TransferOutcome.HttpError -> {
+                            markFailedUnlessCancelled(id, outcome.message)
+                            return@withTransferSlot Result.retry()
+                        }
+                        null -> {
+                            readAttempt++
+                            if (readAttempt > MAX_READ_RETRIES) {
+                                throw IOException("Download stalled after $MAX_READ_RETRIES in-run retries")
+                            }
                             if (shouldStop(id)) {
                                 markCancelledIfExplicit(id)
-                                return@withContext Result.failure()
+                                return@withTransferSlot Result.failure()
                             }
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            if (shouldStop(id)) {
-                                markCancelledIfExplicit(id)
-                                return@withContext Result.failure()
-                            }
-                            output.write(buffer, 0, read)
-                            downloaded += read
-                            if (downloaded >= nextUpdate) {
-                                val progress = totalBytes?.let { ((downloaded * 100) / it).toInt() } ?: 0
-                                setForeground(notificationHelper.foregroundInfo("Downloading dashcam file", progress, totalBytes == null))
-                                if (downloadDao.updateProgressUnlessCancelled(id, DownloadStatus.RUNNING, downloaded, totalBytes, System.currentTimeMillis(), null) == 0) {
-                                    return@withContext Result.failure()
-                                }
-                                nextUpdate = downloaded + 512 * 1024
-                            }
+                            Logger.d("DownloadWorker transient stall; resume attempt $readAttempt for id=$id")
+                            delay(READ_RETRY_DELAY_MS)
                         }
                     }
                 }
-                if (shouldStop(id)) {
-                    markCancelledIfExplicit(id)
-                    return@withContext Result.failure()
-                }
-                if (finalFile.exists() && !finalFile.delete()) error("Could not replace existing download")
-                if (!partialFile.renameTo(finalFile)) {
-                    error("Could not finalize download")
-                }
-                Logger.d("DownloadWorker completed: id=$id bytes=$downloaded path=${finalFile.absolutePath}")
-                if (shouldStop(id)) {
-                    markCancelledIfExplicit(id)
-                    return@withContext Result.failure()
-                }
-                if (downloadDao.updateProgressUnlessCancelled(id, DownloadStatus.COMPLETED, downloaded, totalBytes, System.currentTimeMillis(), null) == 0) {
-                    Result.failure()
-                } else {
-                    Result.success()
-                }
+                @Suppress("UNREACHABLE_CODE")
+                Result.failure()
             }
         } catch (cancellation: CancellationException) {
             markCancelledIfExplicit(id)
@@ -168,6 +152,85 @@ class DownloadWorker @AssistedInject constructor(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * One transfer pass. Resumes from [partialFile] via a Range request, streams to it, and
+     * throws [IOException] on a network stall so the caller can retry-resume. HTTP errors and
+     * cancellation return a typed outcome instead.
+     */
+    private suspend fun transferOnce(id: String, url: String, partialFile: File): TransferOutcome {
+        var existing = partialFile.takeIf { it.exists() }?.length() ?: 0L
+        var request = Request.Builder().url(url).apply {
+            if (existing > 0) header("Range", "bytes=$existing-")
+        }.build()
+        var response = client.newCall(request).execute()
+        Logger.d("DownloadWorker response: code=${response.code} contentLength=${response.body?.contentLength()}")
+        if (existing > 0 && response.code == 200) {
+            // Server ignored the Range and is sending the whole file: reset and start clean.
+            response.close()
+            if (partialFile.exists() && !partialFile.delete()) error("Could not reset partial download")
+            existing = 0L
+            request = Request.Builder().url(url).build()
+            response = client.newCall(request).execute()
+        }
+        if (!response.isSuccessful) {
+            response.close()
+            return TransferOutcome.HttpError(AppError.HttpError(response.code, null).userMessage())
+        }
+        response.use { res ->
+            val body = res.body ?: error("Empty body")
+            val contentLength = body.contentLength().takeIf { it > 0 }
+            val totalBytes = contentLength?.let { it + existing }
+            var downloaded = existing
+            body.byteStream().use { input ->
+                FileOutputStream(partialFile, existing > 0).buffered(128 * 1024).use { output ->
+                    val buffer = ByteArray(128 * 1024)
+                    var nextUpdate = downloaded + 512 * 1024
+                    while (true) {
+                        if (shouldStop(id)) return TransferOutcome.Cancelled
+                        // Yield the camera to a live stream: pause reads (and show Paused) while one
+                        // is playing, then resume where we left off when it stops.
+                        if (coordinator.streaming.value) {
+                            downloadDao.updateProgressUnlessCancelled(id, DownloadStatus.PAUSED, downloaded, totalBytes, System.currentTimeMillis(), null)
+                            coordinator.awaitStreamingIdle()
+                            if (shouldStop(id)) return TransferOutcome.Cancelled
+                            downloadDao.updateProgressUnlessCancelled(id, DownloadStatus.RUNNING, downloaded, totalBytes, System.currentTimeMillis(), null)
+                        }
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        if (downloaded >= nextUpdate) {
+                            val progress = totalBytes?.let { ((downloaded * 100) / it).toInt() } ?: 0
+                            setForeground(notificationHelper.foregroundInfo("Downloading dashcam file", progress, totalBytes == null))
+                            if (downloadDao.updateProgressUnlessCancelled(id, DownloadStatus.RUNNING, downloaded, totalBytes, System.currentTimeMillis(), null) == 0) {
+                                return TransferOutcome.Cancelled
+                            }
+                            nextUpdate = downloaded + 512 * 1024
+                        }
+                    }
+                    output.flush()
+                }
+            }
+        }
+        return TransferOutcome.Completed
+    }
+
+    private suspend fun finalize(id: String, partialFile: File, finalFile: File): Result {
+        if (shouldStop(id)) {
+            markCancelledIfExplicit(id)
+            return Result.failure()
+        }
+        if (finalFile.exists() && !finalFile.delete()) error("Could not replace existing download")
+        if (!partialFile.renameTo(finalFile)) error("Could not finalize download")
+        val bytes = finalFile.length()
+        Logger.d("DownloadWorker completed: id=$id bytes=$bytes path=${finalFile.absolutePath}")
+        return if (downloadDao.updateProgressUnlessCancelled(id, DownloadStatus.COMPLETED, bytes, bytes, System.currentTimeMillis(), null) == 0) {
+            Result.failure()
+        } else {
+            Result.success()
         }
     }
 
@@ -197,6 +260,10 @@ class DownloadWorker @AssistedInject constructor(
     }
 
     companion object {
+        private const val MAX_READ_RETRIES = 4
+        private const val READ_RETRY_DELAY_MS = 1_500L
+        private const val MAX_WORK_ATTEMPTS = 8
+
         fun data(id: String, remotePath: String, localPath: String): Data =
             Data.Builder()
                 .putString(Keys.DOWNLOAD_ID, id)

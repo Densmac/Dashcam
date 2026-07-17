@@ -133,7 +133,13 @@ private fun MainTabsScreen(
                         scope.launch { pagerState.animateScrollToPage(1) }
                     }
                 )
-                Route.Library -> LibraryScreen(onOpenDetail = onOpenDetail)
+                Route.Library -> LibraryScreen(
+                    onOpenDetail = onOpenDetail,
+                    // Smoothly slide to the Transfers tab when a download is queued.
+                    onDownloadEnqueued = {
+                        scope.launch { pagerState.animateScrollToPage(bottomItems.indexOfFirst { it.route == Route.Downloads }) }
+                    }
+                )
                 Route.Downloads -> DownloadsScreen()
                 else -> Unit
             }

@@ -11,6 +11,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -38,23 +39,47 @@ class MediaFilePlayerController @Inject constructor(
     private val _state = MutableStateFlow<MediaPlaybackState>(MediaPlaybackState.Idle)
     val state: StateFlow<MediaPlaybackState> = _state.asStateFlow()
 
+    // Playback position/length in ms and whether the current media supports seeking. Driven by
+    // LibVLC events so the scrubber reflects real player state.
+    private val _progress = MutableStateFlow(MediaProgress())
+    val progress: StateFlow<MediaProgress> = _progress.asStateFlow()
+
+    // True while the user is dragging the scrubber, so incoming TimeChanged events don't fight the
+    // drag thumb.
+    @Volatile private var scrubbing = false
+    // A seek requested before the media is seekable / has a known length, applied once it plays.
+    @Volatile private var pendingSeekFraction: Float? = null
+
     private var libVlc: LibVLC? = null
     private var player: MediaPlayer? = null
     private var videoLayout: VLCVideoLayout? = null
     private var surfaceHost: ViewGroup? = null
     private var surfaceHostReady = CompletableDeferred<ViewGroup>()
     private var currentUrl: String? = null
+    // Known clip length (from the file list) used to seed the scrubber when LibVLC can't measure a
+    // remote .ts stream itself, so seeking is available immediately while streaming.
+    private var currentKnownDurationMs: Long = 0L
 
     fun attach(host: Any) {
         val group = host as? ViewGroup ?: return
+        val hostChanged = surfaceHost !== group
         surfaceHost = group
         if (!surfaceHostReady.isCompleted) surfaceHostReady.complete(group)
-        attachVideoLayout(group)
+        val layout = attachVideoLayout(group)
+        // If playback is already running and we've moved to a different container (e.g. entering
+        // or leaving fullscreen), re-bind the player's views to the new surface so the video
+        // follows the container instead of going black.
+        val activePlayer = player
+        if (activePlayer != null && hostChanged) {
+            runCatching { activePlayer.detachViews() }
+            runCatching { activePlayer.attachViews(layout, null, false, true) }
+        }
     }
 
-    suspend fun play(url: String) = mutex.withLock {
+    suspend fun play(url: String, knownDurationMs: Long = 0L) = mutex.withLock {
         withContext(dispatchers.main) {
             currentUrl = url
+            currentKnownDurationMs = knownDurationMs
             stopInternal(releaseLibVlc = true)
             _state.value = MediaPlaybackState.Opening
             startPlayback(url)
@@ -62,7 +87,36 @@ class MediaFilePlayerController @Inject constructor(
     }
 
     suspend fun retry() {
-        currentUrl?.let { play(it) }
+        currentUrl?.let { play(it, currentKnownDurationMs) }
+    }
+
+    /**
+     * Stop and release the current player (closing the camera's single-session playback socket) but
+     * keep the attached surface so the next [play] can reuse it. Used when swiping between clips: the
+     * old stream must be torn down before the next GET, without destroying the video surface.
+     */
+    suspend fun stop() = mutex.withLock {
+        withContext(dispatchers.main) {
+            stopInternal(releaseLibVlc = true)
+            _progress.value = MediaProgress()
+            scrubbing = false
+            pendingSeekFraction = null
+            currentUrl = null
+            _state.value = MediaPlaybackState.Idle
+        }
+    }
+
+    /**
+     * Re-bind the running player to the current surface. Call when the app returns to the
+     * foreground: the Android Surface backing the video is destroyed while backgrounded, so audio
+     * keeps playing but the picture is lost until the views are re-attached.
+     */
+    fun reattach() {
+        val host = surfaceHost ?: return
+        val activePlayer = player ?: return
+        val layout = attachVideoLayout(host)
+        runCatching { activePlayer.detachViews() }
+        runCatching { activePlayer.attachViews(layout, null, false, true) }
     }
 
     suspend fun pause() = mutex.withLock {
@@ -88,7 +142,59 @@ class MediaFilePlayerController @Inject constructor(
         }
     }
 
+    /** Called when the user starts dragging the scrubber; freezes position updates from the player. */
+    fun beginScrub() {
+        scrubbing = true
+    }
+
+    /** Live preview of the thumb position (0f..1f) during a drag, without seeking yet. */
+    fun previewScrub(fraction: Float) {
+        val f = fraction.coerceIn(0f, 1f)
+        _progress.update { p ->
+            p.copy(position = f, positionMs = (f * p.durationMs).toLong())
+        }
+    }
+
+    /**
+     * Commit a seek to [fraction] (0f..1f) and keep playing from there. Handles the awkward cases
+     * robustly: media that isn't marked seekable yet (defer until it plays), a clip that already
+     * Ended (replay from the seek point), and a paused player (resume after the jump).
+     */
+    suspend fun seekTo(fraction: Float) = mutex.withLock {
+        withContext(dispatchers.main) {
+            val p = player
+            scrubbing = false
+            if (p == null) return@withContext
+            val target = fraction.coerceIn(0f, 1f)
+            if (_state.value == MediaPlaybackState.Ended) {
+                // Restart the media and jump to the target once it's playing again.
+                pendingSeekFraction = target
+                runCatching { p.stop() }
+                runCatching { p.play() }
+                return@withContext
+            }
+            applySeek(p, target)
+            if (!p.isPlaying) {
+                runCatching { p.play() }
+                _state.value = MediaPlaybackState.Playing
+            }
+        }
+    }
+
+    private fun applySeek(p: MediaPlayer, fraction: Float) {
+        // Position (0f..1f) maps to a byte offset even when the container duration is unknown,
+        // which is how .ts-over-HTTP seeking works (LibVLC re-syncs to the next TS packet). It
+        // also works for local files, so prefer it uniformly.
+        runCatching { p.position = fraction }
+        _progress.update {
+            it.copy(position = fraction, positionMs = (fraction * it.durationMs).toLong())
+        }
+    }
+
     fun release() {
+        _progress.value = MediaProgress()
+        scrubbing = false
+        pendingSeekFraction = null
         stopInternal(releaseLibVlc = true)
         videoLayout?.let { layout -> (layout.parent as? ViewGroup)?.removeView(layout) }
         videoLayout = null
@@ -122,9 +228,16 @@ class MediaFilePlayerController @Inject constructor(
             )
         }.also { libVlc = it }
 
+        // Seed the scrubber as seekable so it's usable immediately: both local files and the
+        // camera's raw .ts over HTTP support Range seeking. SeekableChanged/LengthChanged refine it.
+        _progress.value = MediaProgress(durationMs = currentKnownDurationMs, seekable = true)
+        scrubbing = false
         val vlcPlayer = MediaPlayer(vlc)
         player = vlcPlayer
-        vlcPlayer.attachViews(layout, null, false, false)
+        // Render on a TextureView (last arg = true), not a SurfaceView: a SurfaceView punches its own
+        // window and shows only audio when hosted inside the fullscreen Compose Dialog, whereas a
+        // TextureView composites normally in any window.
+        vlcPlayer.attachViews(layout, null, false, true)
         vlcPlayer.setEventListener { event ->
             when (event.type) {
                 MediaPlayer.Event.Opening -> _state.value = MediaPlaybackState.Opening
@@ -132,26 +245,60 @@ class MediaFilePlayerController @Inject constructor(
                     if (_state.value != MediaPlaybackState.Playing) {
                         _state.value = MediaPlaybackState.Buffering
                     }
-                MediaPlayer.Event.Playing -> _state.value = MediaPlaybackState.Playing
+                MediaPlayer.Event.Playing -> {
+                    _state.value = MediaPlaybackState.Playing
+                    // Apply a seek that was requested before the media was seekable / measured.
+                    pendingSeekFraction?.let { fraction ->
+                        pendingSeekFraction = null
+                        applySeek(vlcPlayer, fraction)
+                    }
+                }
                 MediaPlayer.Event.Paused -> _state.value = MediaPlaybackState.Paused
-                MediaPlayer.Event.EndReached -> _state.value = MediaPlaybackState.Ended
+                MediaPlayer.Event.EndReached -> {
+                    _state.value = MediaPlaybackState.Ended
+                    // Reset the scrubber to the start; playback stays stopped until the user replays.
+                    _progress.update { it.copy(position = 0f, positionMs = 0L) }
+                }
                 MediaPlayer.Event.EncounteredError -> {
                     Logger.d("MediaFilePlayer encountered error for $url")
                     _state.value = MediaPlaybackState.Error(com.densmac.dashcam.core.common.AppError.RtspUnavailable)
                 }
+                MediaPlayer.Event.TimeChanged ->
+                    // Only trust LibVLC's clock when we have no known duration; otherwise elapsed is
+                    // derived from position × duration (PositionChanged), which is accurate for the
+                    // proxied .ts even though LibVLC's own time counter isn't.
+                    if (!scrubbing) _progress.update { if (it.durationMs > 0) it else it.copy(positionMs = event.timeChanged) }
+                MediaPlayer.Event.PositionChanged ->
+                    if (!scrubbing) _progress.update {
+                        val pos = event.positionChanged.coerceIn(0f, 1f)
+                        it.copy(position = pos, positionMs = if (it.durationMs > 0) (pos * it.durationMs).toLong() else it.positionMs)
+                    }
+                MediaPlayer.Event.LengthChanged ->
+                    _progress.update { it.copy(durationMs = event.lengthChanged) }
+                MediaPlayer.Event.SeekableChanged ->
+                    _progress.update { it.copy(seekable = event.seekable) }
             }
         }
 
+        val remote = url.startsWith("http", ignoreCase = true)
         runCatching {
             // Building the Media parses the source (disk/network I/O), so do it off the main thread.
             val media = withContext(dispatchers.io) {
                 Media(vlc, Uri.parse(url)).apply {
                     setHWDecoderEnabled(true, false)
-                    addOption(":network-caching=1500")
-                    addOption(":file-caching=1500")
+                    if (remote) {
+                        // The camera serves the raw .ts over HTTP with Range support (this is how
+                        // Viidure plays back: Range GETs to stream and to read the tail for
+                        // duration). Do NOT force http-continuous — that turns it into a live
+                        // stream, disabling Range/seek and breaking A/V sync. A modest buffer
+                        // smooths the single-session camera's bursty delivery.
+                        addOption(":network-caching=2000")
+                    } else {
+                        addOption(":file-caching=1500")
+                    }
                 }
             }
-            Logger.d("MediaFilePlayer opening: $url")
+            Logger.d("MediaFilePlayer opening: $url (remote=$remote)")
             vlcPlayer.media = media
             media.release()
             vlcPlayer.play()

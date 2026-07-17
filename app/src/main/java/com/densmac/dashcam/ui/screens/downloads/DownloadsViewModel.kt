@@ -23,6 +23,7 @@ import javax.inject.Inject
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(
     private val downloadRepository: DownloadRepository,
+    preferencesDataSource: com.densmac.dashcam.data.datastore.UserPreferencesDataSource,
     val mediaPlayer: MediaFilePlayerController
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DownloadsUiState())
@@ -32,6 +33,11 @@ class DownloadsViewModel @Inject constructor(
         viewModelScope.launch {
             downloadRepository.observeDownloads().collectLatest { downloads ->
                 _uiState.update { it.copy(downloads = downloads) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesDataSource.preferences.collectLatest { prefs ->
+                _uiState.update { it.copy(externalPlayerPackage = prefs.externalPlayerPackage) }
             }
         }
         viewModelScope.launch {
@@ -55,6 +61,21 @@ class DownloadsViewModel @Inject constructor(
         _uiState.update { it.copy(playing = null, playbackState = MediaPlaybackState.Idle) }
     }
 
+    /** Swipe to the next completed download in the list and play it. */
+    fun playNext() = navigatePlaying(1)
+
+    /** Swipe to the previous completed download in the list and play it. */
+    fun playPrevious() = navigatePlaying(-1)
+
+    private fun navigatePlaying(delta: Int) {
+        val current = uiState.value.playing ?: return
+        val completed = uiState.value.downloads.filter { it.status == DownloadStatus.COMPLETED }
+        val index = completed.indexOfFirst { it.id == current.id }
+        if (index < 0) return
+        val target = completed.getOrNull(index + delta) ?: return
+        play(target)
+    }
+
     fun retryPlayback() {
         viewModelScope.launch { mediaPlayer.retry() }
     }
@@ -67,6 +88,17 @@ class DownloadsViewModel @Inject constructor(
                 else -> Unit
             }
         }
+    }
+
+    /** Replay from the start (used after the clip ends). */
+    fun replay() {
+        viewModelScope.launch { mediaPlayer.seekTo(0f) }
+    }
+
+    fun beginScrub() = mediaPlayer.beginScrub()
+    fun previewScrub(fraction: Float) = mediaPlayer.previewScrub(fraction)
+    fun seekTo(fraction: Float) {
+        viewModelScope.launch { mediaPlayer.seekTo(fraction) }
     }
 
     fun localFileFor(item: DownloadItem): File = File(item.localPath)

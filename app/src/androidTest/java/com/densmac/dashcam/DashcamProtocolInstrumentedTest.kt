@@ -86,6 +86,31 @@ class DashcamProtocolInstrumentedTest {
     }
 
     @Test
+    fun rawTsGetSupportsRange() = runBlocking {
+        // Seeking a streamed recording relies on the camera serving Range requests on the raw .ts
+        // (this is how the in-app scrubber and Viidure both seek). Verify a 206 partial response.
+        api.playback("enter")
+        val file = api.getFileList("loop", 0, 199).info
+            ?.flatMap { it.files.orEmpty() }
+            ?.map { it.name }
+            ?.firstOrNull { it.startsWith("/mnt/sdcard/") && it.endsWith(".ts") }
+        assumeTrue("No loop recording to range-test", file != null)
+
+        val url = DashcamConstants.HTTP_BASE_URL + file!!.removePrefix("/")
+        val client = OkHttpClient.Builder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .build()
+        val response = client.newCall(
+            okhttp3.Request.Builder().url(url).header("Range", "bytes=0-1023").build()
+        ).execute()
+        response.use {
+            assertEquals("Camera must answer Range with 206 Partial Content", 206, it.code)
+            assertTrue("Missing Content-Range header", it.header("Content-Range") != null)
+        }
+    }
+
+    @Test
     fun rtspPortAnswersOptions() {
         val socket = Socket()
         try {

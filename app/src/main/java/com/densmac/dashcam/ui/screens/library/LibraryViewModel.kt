@@ -7,6 +7,7 @@ import com.densmac.dashcam.core.common.AppResult
 import com.densmac.dashcam.core.common.deleteFilesUserMessage
 import com.densmac.dashcam.core.common.userMessage
 import com.densmac.dashcam.core.network.DashcamConnectionMonitor
+import com.densmac.dashcam.data.download.DownloadCoordinator
 import com.densmac.dashcam.domain.model.DashcamConnectionState
 import com.densmac.dashcam.domain.model.DashcamFile
 import com.densmac.dashcam.domain.model.DashcamFileBundle
@@ -33,7 +34,8 @@ class LibraryViewModel @Inject constructor(
     private val deleteFile: DeleteFileUseCase,
     private val downloadRepository: DownloadRepository,
     private val fileRepository: FileRepository,
-    private val connectionMonitor: DashcamConnectionMonitor
+    private val connectionMonitor: DashcamConnectionMonitor,
+    private val downloadCoordinator: DownloadCoordinator
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LibraryUiState())
     val uiState: StateFlow<LibraryUiState> = _uiState.asStateFlow()
@@ -141,6 +143,9 @@ class LibraryViewModel @Inject constructor(
 
     private suspend fun fetchThumbnail(file: DashcamFile): ByteArray? {
         val path = file.path
+        // Yield to active downloads: the camera is single-session, so thumbnail reads back off
+        // while a transfer holds the slot (up to a cap so they still eventually load).
+        downloadCoordinator.awaitTransfersIdle(THUMBNAIL_YIELD_TIMEOUT_MS)
         val bytes = when (val result = fileRepository.getThumbnailBytes(path)) {
             is AppResult.Success -> result.data
             is AppResult.Failure -> null
@@ -166,5 +171,6 @@ class LibraryViewModel @Inject constructor(
     private companion object {
         const val MIN_USEFUL_THUMBNAIL_BYTES = 4 * 1024
         const val THUMBNAIL_CACHE_LIMIT = 160
+        const val THUMBNAIL_YIELD_TIMEOUT_MS = 5_000L
     }
 }
