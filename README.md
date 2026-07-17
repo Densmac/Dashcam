@@ -7,6 +7,16 @@ downloading them, save clips to your phone, and manage the camera, all from a mi
 > **Unofficial & independent.** This project is not affiliated with, endorsed by, or sponsored by any
 > dashcam manufacturer. It talks to the camera over its documented local HTTP/RTSP interface only.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/live.png" width="240" alt="Live preview"><br><sub>Live preview</sub></td>
+    <td align="center"><img src="docs/screenshots/settings.png" width="240" alt="Settings"><br><sub>Settings</sub></td>
+    <td align="center"><img src="docs/screenshots/transfers.png" width="240" alt="Transfers"><br><sub>Transfers</sub></td>
+  </tr>
+</table>
+
 ## Features
 
 - **Live preview** — low-latency RTSP view of the front or rear camera, with in-place camera
