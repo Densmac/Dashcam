@@ -99,7 +99,6 @@ fun SettingsScreen(
                 fontWeight = FontWeight.SemiBold
             )
         }
-        ConnectionSection(state)
         NetworkSection(state, viewModel)
         RecordingSection(state, viewModel)
         SoundSection(state, viewModel)
@@ -190,23 +189,6 @@ private fun NavRow(title: String, value: String, enabled: Boolean, onClick: () -
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-    }
-}
-
-@Composable
-private fun ConnectionSection(state: SettingsUiState) {
-    GlassCard {
-        SectionHeader("Connection")
-        Spacer(Modifier.height(14.dp))
-        val text = when (val connection = state.connectionState) {
-            is DashcamConnectionState.Connected -> "${connection.device.model ?: "YantopCam"} - ${connection.device.uuid}"
-            is DashcamConnectionState.ApiUnreachable -> connection.message
-            DashcamConnectionState.Searching -> "Searching for DASHCAM Wi-Fi"
-            DashcamConnectionState.Unknown -> "Unknown"
-            DashcamConnectionState.NotConnectedToWifi -> "Not connected to DASHCAM Wi-Fi"
-            is DashcamConnectionState.WrongWifi -> "Wrong Wi-Fi: ${connection.currentSsid ?: "unknown"}"
-        }
-        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

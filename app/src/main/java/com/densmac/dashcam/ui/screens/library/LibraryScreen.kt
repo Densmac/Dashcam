@@ -45,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -81,6 +82,12 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Thumbnail prefetch only runs while this grid is on screen; opening a clip (which disposes this
+    // composable) pauses it so the single-session camera isn't starved when the clip loads.
+    DisposableEffect(Unit) {
+        viewModel.resumePrefetch()
+        onDispose { viewModel.pausePrefetch() }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()

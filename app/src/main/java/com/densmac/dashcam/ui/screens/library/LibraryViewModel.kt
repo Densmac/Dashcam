@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,7 +36,8 @@ class LibraryViewModel @Inject constructor(
     private val downloadRepository: DownloadRepository,
     private val fileRepository: FileRepository,
     private val connectionMonitor: DashcamConnectionMonitor,
-    private val downloadCoordinator: DownloadCoordinator
+    private val downloadCoordinator: DownloadCoordinator,
+    private val thumbnailStore: com.densmac.dashcam.data.thumbnail.ThumbnailStore
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LibraryUiState())
     val uiState: StateFlow<LibraryUiState> = _uiState.asStateFlow()
@@ -44,6 +46,8 @@ class LibraryViewModel @Inject constructor(
     private val thumbnailMutex = Mutex()
     private val thumbnailCache = LinkedHashMap<String, ByteArray>()
     private val thumbnailRequests = mutableMapOf<String, Deferred<ByteArray?>>()
+    private var prefetchJob: kotlinx.coroutines.Job? = null
+    @Volatile private var prefetchAllowed: Boolean = true
 
     init {
         connectionMonitor.startMonitoring()
@@ -68,10 +72,48 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(folder = folder, loading = true, message = null, selectedIds = emptySet()) }
             when (val result = getFileBundles(folder)) {
-                is AppResult.Success -> _uiState.update { it.copy(loading = false, bundles = result.data) }
+                is AppResult.Success -> {
+                    _uiState.update { it.copy(loading = false, bundles = result.data) }
+                    startPrefetch(result.data)
+                }
                 is AppResult.Failure -> _uiState.update { it.copy(loading = false, message = result.error.userMessage()) }
             }
         }
+    }
+
+    /**
+     * Warm the thumbnail caches in list order so items further down appear quickly when scrolled to.
+     * Sequential (the camera is single-session) and yields to active streaming/transfers so it never
+     * fights higher-priority camera use. Disk-cached thumbnails resolve instantly without a fetch.
+     */
+    private fun startPrefetch(bundles: List<DashcamFileBundle>) {
+        prefetchJob?.cancel()
+        if (!prefetchAllowed) return
+        prefetchJob = viewModelScope.launch {
+            for (bundle in bundles) {
+                downloadCoordinator.awaitStreamingIdle()
+                bundle.front?.let { runCatching { loadThumbnail(it) } }
+                bundle.rear?.let { runCatching { loadThumbnail(it) } }
+                // Leave gaps between fetches so the single-session camera stays responsive to
+                // higher-priority reads (opening a clip, on-demand thumbnails for visible items).
+                delay(PREFETCH_GAP_MS)
+            }
+        }
+    }
+
+    /**
+     * Prefetch only runs while the library grid is on screen. Opening a clip (or leaving the tab)
+     * pauses it so the single-session camera isn't starved when the clip's file list is loading.
+     */
+    fun pausePrefetch() {
+        prefetchAllowed = false
+        prefetchJob?.cancel()
+        prefetchJob = null
+    }
+
+    fun resumePrefetch() {
+        prefetchAllowed = true
+        if (prefetchJob?.isActive != true) startPrefetch(uiState.value.bundles)
     }
 
     fun toggleSelection(bundle: DashcamFileBundle) {
@@ -143,6 +185,13 @@ class LibraryViewModel @Inject constructor(
 
     private suspend fun fetchThumbnail(file: DashcamFile): ByteArray? {
         val path = file.path
+        // Persistent disk cache: resolves instantly with no camera hit (survives app restarts).
+        thumbnailStore.get(path)?.let { disk ->
+            if (disk.size >= MIN_USEFUL_THUMBNAIL_BYTES) {
+                thumbnailMutex.withLock { putInMemory(path, disk) }
+                return disk
+            }
+        }
         // Yield to active downloads: the camera is single-session, so thumbnail reads back off
         // while a transfer holds the slot (up to a cap so they still eventually load).
         downloadCoordinator.awaitTransfersIdle(THUMBNAIL_YIELD_TIMEOUT_MS)
@@ -153,17 +202,21 @@ class LibraryViewModel @Inject constructor(
         val cached = thumbnailMutex.withLock { thumbnailCache[path] }
         if (bytes == null || bytes.size < MIN_USEFUL_THUMBNAIL_BYTES) return cached
 
-        thumbnailMutex.withLock {
-            thumbnailCache[path] = bytes
-            while (thumbnailCache.size > THUMBNAIL_CACHE_LIMIT) {
-                val eldest = thumbnailCache.entries.iterator().next()
-                thumbnailCache.remove(eldest.key)
-            }
-        }
+        thumbnailMutex.withLock { putInMemory(path, bytes) }
+        thumbnailStore.put(path, bytes)
         return bytes
     }
 
+    private fun putInMemory(path: String, bytes: ByteArray) {
+        thumbnailCache[path] = bytes
+        while (thumbnailCache.size > THUMBNAIL_CACHE_LIMIT) {
+            val eldest = thumbnailCache.entries.iterator().next()
+            thumbnailCache.remove(eldest.key)
+        }
+    }
+
     override fun onCleared() {
+        prefetchJob?.cancel()
         connectionMonitor.stopMonitoring()
         super.onCleared()
     }
@@ -172,5 +225,6 @@ class LibraryViewModel @Inject constructor(
         const val MIN_USEFUL_THUMBNAIL_BYTES = 4 * 1024
         const val THUMBNAIL_CACHE_LIMIT = 160
         const val THUMBNAIL_YIELD_TIMEOUT_MS = 5_000L
+        const val PREFETCH_GAP_MS = 120L
     }
 }
