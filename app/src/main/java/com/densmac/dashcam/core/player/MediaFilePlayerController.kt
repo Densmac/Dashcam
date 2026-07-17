@@ -274,7 +274,9 @@ class MediaFilePlayerController @Inject constructor(
                         it.copy(position = pos, positionMs = if (it.durationMs > 0) (pos * it.durationMs).toLong() else it.positionMs)
                     }
                 MediaPlayer.Event.LengthChanged ->
-                    _progress.update { it.copy(durationMs = event.lengthChanged) }
+                    // LibVLC reports length 0 for the raw .ts; don't let that clobber the duration we
+                    // probed from the TS timestamps (which drives the total-time label and elapsed).
+                    if (event.lengthChanged > 0) _progress.update { it.copy(durationMs = event.lengthChanged) }
                 MediaPlayer.Event.SeekableChanged ->
                     _progress.update { it.copy(seekable = event.seekable) }
             }
@@ -290,9 +292,17 @@ class MediaFilePlayerController @Inject constructor(
                         // The camera serves the raw .ts over HTTP with Range support (this is how
                         // Viidure plays back: Range GETs to stream and to read the tail for
                         // duration). Do NOT force http-continuous — that turns it into a live
-                        // stream, disabling Range/seek and breaking A/V sync. A modest buffer
-                        // smooths the single-session camera's bursty delivery.
-                        addOption(":network-caching=2000")
+                        // stream, disabling Range/seek and breaking A/V sync.
+                        //
+                        // Making the stream seekable (via the loopback proxy) makes LibVLC buffer
+                        // less than it did for a "live" stream, so the single-session camera's bursty
+                        // 4K delivery underruns and playback stutters. A deep cache here plus the
+                        // proxy's 48 MB read-ahead ride through the camera's SD-contention gaps for
+                        // smooth continuous play. (Seeks still re-buffer a few seconds — that's
+                        // camera-bound: seeking cold-starts a new transfer at a new byte offset on
+                        // the single-session server — and isn't reduced by lowering this.)
+                        addOption(":network-caching=5000")
+                        addOption(":clock-jitter=0")
                     } else {
                         addOption(":file-caching=1500")
                     }

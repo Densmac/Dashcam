@@ -115,13 +115,44 @@ class DashcamStreamProxy @Inject constructor() {
                     sb.append("Connection: close\r\n\r\n")
                     out.write(sb.toString().toByteArray())
                     if (method != "HEAD") {
-                        resp.body?.byteStream()?.copyTo(out, DEFAULT_BUFFER)
+                        resp.body?.byteStream()?.let { pumpWithReadAhead(it, out) }
                     }
                     out.flush()
                 }
             }.onFailure {
                 // Client (LibVLC) hanging up mid-stream during a seek is normal; don't spam errors.
             }
+        }
+    }
+
+    /**
+     * Copy [source] (the camera) to [out] (LibVLC) through a bounded read-ahead buffer. A producer
+     * thread pulls from the camera as fast as it delivers — filling up to READ_AHEAD_BYTES ahead of
+     * playback — while the caller thread drains to LibVLC. This decouples the camera's bursty,
+     * single-session delivery from LibVLC's consumption, so burst gaps are covered by the buffer
+     * instead of stalling playback.
+     */
+    private fun pumpWithReadAhead(source: java.io.InputStream, out: OutputStream) {
+        val queue = java.util.concurrent.ArrayBlockingQueue<ByteArray>(READ_AHEAD_CHUNKS)
+        val producer = Thread({
+            val buf = ByteArray(CHUNK_BYTES)
+            runCatching {
+                while (true) {
+                    val n = source.read(buf)
+                    if (n < 0) break
+                    if (n > 0) queue.put(buf.copyOf(n)) // blocks when full -> bounded read-ahead
+                }
+            }
+            runCatching { queue.put(EOF) }
+        }, "dashcam-stream-readahead").apply { isDaemon = true; start() }
+        try {
+            while (true) {
+                val chunk = queue.take()
+                if (chunk === EOF) break
+                out.write(chunk)
+            }
+        } finally {
+            producer.interrupt()
         }
     }
 
@@ -151,6 +182,12 @@ class DashcamStreamProxy @Inject constructor() {
     }
 
     private companion object {
-        const val DEFAULT_BUFFER = 64 * 1024
+        const val CHUNK_BYTES = 64 * 1024
+        // ~48 MB of read-ahead (768 x 64 KB): ~12 s of 4K video buffered ahead of playback. The
+        // camera records 4K front+rear to the SD card while serving the stream from the same card,
+        // so it stalls delivery for several seconds at a time; a deep buffer rides through those
+        // gaps (whenever the camera can briefly deliver faster than 1x, this races ahead to refill).
+        const val READ_AHEAD_CHUNKS = 768
+        val EOF = ByteArray(0)
     }
 }
