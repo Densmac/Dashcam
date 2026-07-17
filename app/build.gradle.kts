@@ -34,11 +34,17 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
 
-        // Ship only the ARM ABIs used by real phones. LibVLC's native libs dominate the APK, and the
-        // x86/x86_64 variants are emulator-only — excluding them roughly halves the download.
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+    // LibVLC's native libs dominate the APK, and the x86/x86_64 variants are emulator-only. Build a
+    // separate APK per real-phone ABI so each user downloads only what their device needs
+    // (~70 MB arm64-v8a, ~55 MB armeabi-v7a) instead of one fat ~110 MB file.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
         }
     }
 
