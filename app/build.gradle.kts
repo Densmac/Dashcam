@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +8,15 @@ plugins {
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
 }
+
+// Release signing is configured from a gitignored `keystore.properties` at the repo root (or the
+// matching DASHCAM_* environment variables), so no secrets live in version control.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) FileInputStream(keystorePropsFile).use { load(it) }
+}
+val hasReleaseSigning = keystoreProps.getProperty("storeFile") != null ||
+    System.getenv("DASHCAM_STORE_FILE") != null
 
 android {
     namespace = "com.densmac.dashcam"
@@ -24,10 +36,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile") ?: System.getenv("DASHCAM_STORE_FILE"))
+                storePassword = keystoreProps.getProperty("storePassword") ?: System.getenv("DASHCAM_STORE_PASSWORD")
+                keyAlias = keystoreProps.getProperty("keyAlias") ?: System.getenv("DASHCAM_KEY_ALIAS")
+                keyPassword = keystoreProps.getProperty("keyPassword") ?: System.getenv("DASHCAM_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             optimization {
                 enable = false
+            }
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }

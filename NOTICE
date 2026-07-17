@@ -1,0 +1,27 @@
+Dashcam Companion
+Copyright 2026 Densmac
+
+This product includes software developed as part of the Dashcam Companion project,
+licensed under the Apache License, Version 2.0.
+
+------------------------------------------------------------------------
+Third-party components
+------------------------------------------------------------------------
+
+This application bundles and/or depends on the following third-party
+software, each under its own license:
+
+* LibVLC for Android (org.videolan.android) — GNU Lesser General Public
+  License, version 2.1 or later (LGPL-2.1+). Source: https://code.videolan.org/videolan/vlc-android
+  LibVLC is used for RTSP live preview and on-demand playback of recordings.
+  It is dynamically linked; its source and license terms are available from
+  the VideoLAN project.
+
+* AndroidX / Jetpack, Jetpack Compose, Hilt, OkHttp, Retrofit, Gson and other
+  libraries declared in gradle/libs.versions.toml — each under its respective
+  license (predominantly the Apache License, Version 2.0).
+
+This project is an independent, unofficial companion app. It is not affiliated
+with, endorsed by, or sponsored by the manufacturer of any dashcam hardware, and
+all product names, trademarks, and registered trademarks are the property of
+their respective owners.
