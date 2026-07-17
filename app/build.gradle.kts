@@ -34,6 +34,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Ship only the ARM ABIs used by real phones. LibVLC's native libs dominate the APK, and the
+        // x86/x86_64 variants are emulator-only — excluding them roughly halves the download.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     signingConfigs {
